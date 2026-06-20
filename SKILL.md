@@ -107,9 +107,9 @@ Report the important fields:
 
 ### 6. Try the Same Ticket Again
 
-Submit another `echo-cred` task with the same credential. It should be rejected
-because the postcard ticket was already redeemed. This is the redemption part of
-the demo.
+Submit another `echo-cred` task with the same credential. GitHub will accept the
+Issue, but the node's `watch` validation should reject it with
+`credential already redeemed`. This is the redemption part of the demo.
 
 ### 7. Epilogue
 

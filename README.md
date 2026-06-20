@@ -13,7 +13,7 @@ This repository is a bundled Creamlon melon. Public protocol files live in
 2. A caller submits a GitHub Issue task with the credential binding.
 3. The operator auto-delivers a sealed postcard response.
 4. Anyone can verify `signature_ok` and `binding_ok` from the public proof.
-5. Reusing the same credential is rejected.
+5. Reusing the same credential is rejected during node validation.
 
 ## Local Operator Setup
 
