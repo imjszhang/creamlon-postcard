@@ -1,1 +1,2 @@
 # One JSON redemption record per line. Do not store credential secrets here.
+{"version":"1","request_id":"fc644b9a-b302-4ddf-8e8f-8a27db62a258","credential_id":"-2J7NhprOSlfOCsZ","credential_digest":"sha256:81cb04baf479b38dbe6080ca1faf4e505891a5229f7235bf9b3ab9391604f9ae","task_intent_digest":"sha256:dd4a1509ac03773be1e621787dc5b7fae7dd106e362e54b42e2407164e761c2d","capability_id":"echo-cred","redeemed_at":"2026-06-20T18:00:44.840Z"}
