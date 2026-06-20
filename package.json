@@ -1,0 +1,16 @@
+{
+  "name": "creamlon-postcard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playable Creamlon Postcard demo: one-time credential tasks and signed delivery proofs.",
+  "type": "module",
+  "scripts": {
+    "vendor": "node vendor/server.mjs",
+    "auto-deliver": "node scripts/auto-deliver.mjs",
+    "check": "node --check vendor/server.mjs && node --check scripts/auto-deliver.mjs"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}

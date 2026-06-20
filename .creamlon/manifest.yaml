@@ -1,0 +1,44 @@
+version: "1"
+name: creamlon-postcard
+description: Creamlon Postcard is a playable demo melon for one-time credential tasks and signed delivery proofs.
+identity:
+  type: ed25519
+  public_key: "kwckaviKJVmQDwSGMISxpMYlkLD-aad8LbW5P0X_8ok"
+status: available
+capabilities:
+  - id: echo
+    description: Free echo postcard smoke test
+    input:
+      media_types:
+        - text/plain
+    output:
+      media_types:
+        - text/plain
+  - id: echo-cred
+    description: Credential-gated Creamlon Postcard demo
+    input:
+      media_types:
+        - text/plain
+    output:
+      media_types:
+        - text/plain
+    access:
+      mode: credential
+      units: 1
+profiles:
+  github:
+    transport: issues
+  credential:
+    scheme: voucher-hmac-v1
+    instructions: "Start the local demo vendor, then POST /buy/echo-cred to receive a one-time postcard credential."
+extensions:
+  payment:
+    pattern: payment-bridge-v1
+    instructions: "Local MVP: POST http://localhost:8787/buy/echo-cred with github, ref, and skill to receive a one-time credential."
+    providers:
+      - id: demo-vendor
+        capability_id: echo-cred
+        resource_url: http://localhost:8787/buy/echo-cred
+        network: local
+        asset: postcard-ticket
+        price: "0"
