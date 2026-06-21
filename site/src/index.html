@@ -159,6 +159,19 @@
         padding: 22px;
       }
 
+      .section-header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 12px;
+      }
+
+      .section-header h2 {
+        margin: 0;
+      }
+
       .prompt {
         overflow: auto;
         max-height: 680px;
@@ -265,7 +278,10 @@
       </section>
 
       <section class="panel section">
-        <h2>Agent Instructions</h2>
+        <div class="section-header">
+          <h2>Agent Instructions</h2>
+          <button class="primary copy-action" type="button">Copy Instructions</button>
+        </div>
         <p class="note">
           Copy this block into your agent. The page does not authenticate GitHub
           users; your agent must use your own GitHub authorization.
@@ -354,22 +370,28 @@ receipt_path: .creamlon-inbox/purchases/&lt;payment_intent_id&gt;.json
     </main>
 
     <script>
-      const copyButton = document.querySelector("#copyPrompt");
+      const copyButtons = document.querySelectorAll("#copyPrompt, .copy-action");
       const copyState = document.querySelector("#copyState");
       const agentPrompt = document.querySelector("#agentPrompt");
 
-      copyButton.addEventListener("click", async () => {
+      async function copyInstructions(event) {
         const text = agentPrompt.textContent.trim();
+        const button = event.currentTarget;
+        const originalText = button.textContent;
         try {
           await navigator.clipboard.writeText(text);
           copyState.textContent = "Copied. Paste it into your agent.";
-          copyButton.textContent = "Copied";
+          button.textContent = "Copied";
           setTimeout(() => {
-            copyButton.textContent = "Copy Agent Instructions";
+            button.textContent = originalText;
           }, 1800);
         } catch {
           copyState.textContent = "Select the instruction block and copy it manually.";
         }
+      }
+
+      copyButtons.forEach((button) => {
+        button.addEventListener("click", copyInstructions);
       });
     </script>
   </body>
