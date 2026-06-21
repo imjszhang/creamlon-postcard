@@ -8,7 +8,7 @@ Creamlon Postcard is a playable local demo. It exposes:
 
 - `echo`: free postcard smoke test
 - `echo-cred`: credential-gated postcard task using a one-time `crv1_...`
-  credential from the local demo vendor
+  credential from the GitHub Pages demo vendor and a buyer private inbox
 
 ## For External Agents
 
@@ -20,8 +20,9 @@ repository metadata:
 2. Read `.creamlon/manifest.yaml` on the default branch.
 3. Use `capabilities[]` in the manifest to choose a `capability_id`, input
    media type, output media type, and access mode.
-4. For `echo-cred`, request a credential from the local demo vendor advertised
-   under `extensions.payment.providers[]`.
+4. For `echo-cred`, use the GitHub Pages demo checkout advertised under
+   `extensions.payment.providers[]`, create a buyer private inbox repo, and open
+   a public purchase-redeem Issue.
 5. Submit work by creating GitHub Issues for the selected capability using the
    Creamlon v1 task format.
 6. Verify completed work from the signed proof published in the Issue comments
@@ -57,6 +58,10 @@ Protocol reference:
 - `.creamlon/trust/key-rotations.log`: signed identity key rotation records.
 - `.creamlon/trust/status.json`: public health status written by node
   operations after status refreshes.
+
+Complete credentials and private postcard artifacts are delivered only to the
+buyer-owned private inbox repository. Public Issues and trust logs contain
+credential ids and proof material, not credential secrets.
 
 ## Private Local State
 

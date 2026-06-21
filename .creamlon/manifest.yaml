@@ -30,15 +30,16 @@ profiles:
     transport: issues
   credential:
     scheme: voucher-hmac-v1
-    instructions: "Start the local demo vendor, then POST /buy/echo-cred to receive a one-time postcard credential."
+    instructions: "Use the GitHub Pages demo checkout, create a private GitHub inbox repository, and open a purchase-redeem Issue. The seller writes the complete one-time credential only to the private inbox."
 extensions:
   payment:
     pattern: payment-bridge-v1
-    instructions: "Local MVP: POST http://localhost:8787/buy/echo-cred with github, ref, and skill to receive a one-time credential."
+    instructions: "Open the GitHub Pages demo checkout, create a buyer-owned private inbox repo, write the demo paid receipt there, then open a public purchase-redeem Issue."
     providers:
-      - id: demo-vendor
+      - id: github-pages-demo-vendor
         capability_id: echo-cred
-        resource_url: http://localhost:8787/buy/echo-cred
-        network: local
+        resource_url: https://imjszhang.github.io/creamlon-postcard/buy/echo-cred/
+        network: github
         asset: postcard-ticket
         price: "0"
+        delivery: github-private-inbox

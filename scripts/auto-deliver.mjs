@@ -144,6 +144,52 @@ function runGit(args, cwd) {
   });
 }
 
+async function githubJson(url, token, init = {}) {
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${token}`,
+      'User-Agent': 'creamlon-postcard-auto-deliver',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(init.headers || {}),
+    },
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`GitHub API failed: ${response.status} ${url}\n${text}`);
+  }
+  return text ? JSON.parse(text) : null;
+}
+
+async function writeGitHubFile(repoSlug, filePath, content, message, token) {
+  const { owner, repo } = parseRepoSlug(repoSlug);
+  const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+  let sha = null;
+  try {
+    const existing = await githubJson(`https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`, token);
+    sha = existing.sha || null;
+  } catch (error) {
+    if (!error.message.includes('GitHub API failed: 404')) throw error;
+  }
+  return githubJson(`https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`, token, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      message,
+      content: Buffer.from(content, 'utf8').toString('base64'),
+      ...(sha ? { sha } : {}),
+    }),
+  });
+}
+
+function readPrivateInboxIssuances(nodePath) {
+  const storePath = path.join(nodePath, '.data', 'private-inbox-issuances.json');
+  if (!existsSync(storePath)) return [];
+  const parsed = JSON.parse(readFileSync(storePath, 'utf8'));
+  return Array.isArray(parsed.issuances) ? parsed.issuances : [];
+}
+
 function publicTrustDir(nodePath) {
   const bundledTrust = path.join(nodePath, '.creamlon', 'trust');
   if (existsSync(bundledTrust)) return path.join('.creamlon', 'trust');
@@ -190,6 +236,50 @@ function writePostcardOutput(nodePath, issueNumber, inputValue) {
   ].join('\n');
   writeFileSync(outFile, body, 'utf8');
   return outFile;
+}
+
+async function writePrivateInboxDelivery(nodePath, publicRepo, issueNumber, parsedTask, outputFile, proof, token) {
+  const credentialId = parsedTask.credential?.credential_id;
+  if (!credentialId) return;
+
+  const issuance = readPrivateInboxIssuances(nodePath)
+    .find((item) => item.credential_id === credentialId);
+  if (!issuance?.inbox_repo) return;
+
+  const basePath = `.creamlon-inbox/deliveries/issue-${issueNumber}`;
+  const resultText = readFileSync(outputFile, 'utf8');
+  const status = {
+    version: '1',
+    type: 'postcard_delivery_status',
+    issue_number: issueNumber,
+    credential_id: credentialId,
+    capability_id: parsedTask.capability_id,
+    delivered_at: new Date().toISOString(),
+    public_proof_repo: publicRepo,
+  };
+
+  await writeGitHubFile(
+    issuance.inbox_repo,
+    `${basePath}/result.txt`,
+    resultText,
+    `deliver Creamlon postcard result #${issueNumber}`,
+    token,
+  );
+  await writeGitHubFile(
+    issuance.inbox_repo,
+    `${basePath}/proof.json`,
+    `${JSON.stringify(proof, null, 2)}\n`,
+    `deliver Creamlon postcard proof #${issueNumber}`,
+    token,
+  );
+  await writeGitHubFile(
+    issuance.inbox_repo,
+    `${basePath}/status.json`,
+    `${JSON.stringify(status, null, 2)}\n`,
+    `deliver Creamlon postcard status #${issueNumber}`,
+    token,
+  );
+  console.log(`[ok] Wrote private delivery to ${issuance.inbox_repo}:${basePath}.`);
 }
 
 function maskPathForLog(filePath) {
@@ -279,7 +369,8 @@ async function main() {
       outFile,
       '--pretty',
     ], creamlonPath, cliEnv);
-    parseJsonOutput(delivered, `creamlon deliver #${task.issue_number}`);
+    const proof = parseJsonOutput(delivered, `creamlon deliver #${task.issue_number}`);
+    await writePrivateInboxDelivery(repoPath, nodeRepo, task.issue_number, parsed, outFile, proof, token);
 
     const status = runCreamlon([
       'status',

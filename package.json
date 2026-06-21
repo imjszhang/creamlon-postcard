@@ -6,8 +6,10 @@
   "type": "module",
   "scripts": {
     "vendor": "node vendor/server.mjs",
+    "redeem-purchase": "node scripts/redeem-purchase.mjs",
     "auto-deliver": "node scripts/auto-deliver.mjs",
-    "check": "node --check vendor/server.mjs && node --check scripts/auto-deliver.mjs"
+    "site:build": "node tools/build.js",
+    "check": "node --check vendor/server.mjs && node --check scripts/redeem-purchase.mjs && node --check scripts/auto-deliver.mjs && node --check tools/build.js"
   },
   "engines": {
     "node": ">=18.0.0"

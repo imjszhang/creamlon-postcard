@@ -1,8 +1,9 @@
-# Creamlon Postcard Vendor
+# Creamlon Postcard Local Vendor
 
-Creamlon Postcard uses a local demo vendor to issue one-time credentials for the
-`echo-cred` capability. The vendor is part of the local MVP and is not a public
-payment service.
+Creamlon Postcard keeps this local demo vendor as a compatibility tool for
+localhost experiments. The agent-native public flow uses GitHub Pages plus a
+buyer-owned private inbox instead. See
+`references/github-pages-vendor.md` for the current public demo vendor.
 
 ## Endpoint
 
@@ -58,4 +59,5 @@ Use a short source tag:
 - The vendor binds credentials to `echo-cred`.
 - It stores issuance records under `.data/issuance.json`.
 - It rate-limits by GitHub login and IP in memory.
-- It is intended for localhost testing until a public vendor URL is chosen.
+- It is intended for localhost testing. Public agent flows should use the
+  GitHub Pages demo vendor and private inbox protocol.
