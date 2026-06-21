@@ -6,3 +6,5 @@
 .creamlon/runtime/
 .data/
 dist/
+node_modules/
+.astro/
