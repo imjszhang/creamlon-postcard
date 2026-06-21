@@ -75,16 +75,17 @@ Write this file:
 }
 ```
 
-### 3. Complete the Demo Checkout
+### 3. Hand Off the Agent Checkout
 
 Open the provider URL from the manifest:
 
 ```text
-https://imjszhang.github.io/creamlon-postcard/buy/echo-cred/
+https://imjszhang.github.io/creamlon-postcard/
 ```
 
-Use the page to prepare a demo paid receipt. Write the receipt to the private
-inbox path shown by the page, for example:
+Use the page as an agent handoff card. The buyer agent should confirm the
+authenticated GitHub login, generate the demo receipt, and write it to the
+private inbox, for example:
 
 ```text
 .creamlon-inbox/purchases/pi_demo_YYYYMMDD_your-github-login.json
@@ -92,8 +93,8 @@ inbox path shown by the page, for example:
 
 ### 4. Open the Public Purchase Redeem Issue
 
-Open a GitHub Issue in `imjszhang/creamlon-postcard` using the body from the
-checkout page:
+Open a GitHub Issue in `imjszhang/creamlon-postcard` using the body shape from
+the landing page:
 
 ```yaml
 type: purchase-redeem

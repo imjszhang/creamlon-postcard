@@ -38,7 +38,7 @@ extensions:
     providers:
       - id: github-pages-demo-vendor
         capability_id: echo-cred
-        resource_url: https://imjszhang.github.io/creamlon-postcard/buy/echo-cred/
+        resource_url: https://imjszhang.github.io/creamlon-postcard/
         network: github
         asset: postcard-ticket
         price: "0"

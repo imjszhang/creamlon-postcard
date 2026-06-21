@@ -161,7 +161,17 @@ function assertField(object, field) {
   return value.trim();
 }
 
-function validatePurchase(request, receipt, inboxManifest, publicRepo) {
+function githubPrincipalLogin(value, field) {
+  const match = /^github:([A-Za-z0-9-]{1,39})$/.exec(String(value || ''));
+  if (!match) throw new Error(`${field} must be github:<login>.`);
+  return match[1].toLowerCase();
+}
+
+function sameLogin(left, right) {
+  return String(left || '').toLowerCase() === String(right || '').toLowerCase();
+}
+
+function validatePurchase(request, receipt, inboxManifest, publicRepo, issueAuthor) {
   const type = assertField(request, 'type');
   if (type !== 'purchase-redeem') throw new Error(`Unsupported request type: ${type}`);
   const provider = assertField(request, 'provider');
@@ -171,6 +181,15 @@ function validatePurchase(request, receipt, inboxManifest, publicRepo) {
   const buyer = assertField(request, 'buyer');
   const paymentIntentId = assertField(request, 'payment_intent_id');
   const inboxRepo = assertField(request, 'inbox_repo');
+  const buyerLogin = githubPrincipalLogin(buyer, 'buyer');
+  const inboxOwner = parseRepoSlug(inboxRepo).owner;
+
+  if (!sameLogin(issueAuthor, buyerLogin)) {
+    throw new Error('Issue author does not match buyer.');
+  }
+  if (!sameLogin(inboxOwner, buyerLogin)) {
+    throw new Error('Inbox repository owner does not match buyer.');
+  }
 
   if (receipt.type !== 'purchase_receipt') throw new Error('Receipt type must be purchase_receipt.');
   if (receipt.provider !== provider) throw new Error('Receipt provider does not match request.');
@@ -182,8 +201,6 @@ function validatePurchase(request, receipt, inboxManifest, publicRepo) {
   if (inboxManifest.type !== 'creamlon_private_inbox') throw new Error('Inbox manifest type must be creamlon_private_inbox.');
   if (inboxManifest.owner !== buyer) throw new Error('Inbox owner does not match buyer.');
   if (inboxManifest.public_request_repo !== publicRepo) throw new Error('Inbox public_request_repo does not match seller repo.');
-
-  parseRepoSlug(inboxRepo);
 }
 
 function readIssuanceStore(storePath) {
@@ -264,7 +281,7 @@ async function main() {
   const manifestPath = '.creamlon-inbox/manifest.json';
   const receipt = JSON.parse(await readGitHubFile(inboxRepo, receiptPath, token));
   const inboxManifest = JSON.parse(await readGitHubFile(inboxRepo, manifestPath, token));
-  validatePurchase(request, receipt, inboxManifest, publicRepo);
+  validatePurchase(request, receipt, inboxManifest, publicRepo, issue.user?.login);
 
   const storePath = path.join(repoPath, '.data', 'private-inbox-issuances.json');
   const store = readIssuanceStore(storePath);

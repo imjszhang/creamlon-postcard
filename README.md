@@ -37,10 +37,10 @@ operator state.
 
 ## Run the Agent MVP
 
-The public demo checkout lives at:
+The agent checkout landing page lives at:
 
 ```text
-https://imjszhang.github.io/creamlon-postcard/buy/echo-cred/
+https://imjszhang.github.io/creamlon-postcard/
 ```
 
 Configure GitHub Pages for this repository to use GitHub Actions as the source.

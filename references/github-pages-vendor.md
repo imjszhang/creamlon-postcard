@@ -21,12 +21,12 @@ github-pages-demo-vendor
 Checkout URL:
 
 ```text
-https://imjszhang.github.io/creamlon-postcard/buy/echo-cred/
+https://imjszhang.github.io/creamlon-postcard/
 ```
 
-The page does not create credentials. It gives buyer agents the receipt and
-purchase request shapes they need to create a private inbox and open a public
-purchase redeem Issue.
+The page does not create credentials or authenticate GitHub users. It gives
+buyer agents a copyable task card with the receipt and purchase request shapes
+they need to create a private inbox and open a public purchase redeem Issue.
 
 ## Buyer Private Inbox
 
