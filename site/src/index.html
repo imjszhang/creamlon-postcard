@@ -244,10 +244,8 @@
             <code>echo-cred</code> task, and verify the signed proof.
           </p>
           <div class="actions">
-            <button class="primary" id="copyPrompt" type="button">Copy Agent Instructions</button>
             <a class="button" href="https://github.com/imjszhang/creamlon-postcard">Open Seller Repo</a>
           </div>
-          <div class="copy-state" id="copyState" aria-live="polite"></div>
         </div>
 
         <aside class="panel status-card" aria-label="Protocol summary">
@@ -286,6 +284,7 @@
           Copy this block into your agent. The page does not authenticate GitHub
           users; your agent must use your own GitHub authorization.
         </p>
+        <div class="copy-state" id="copyState" aria-live="polite"></div>
         <pre class="prompt" id="agentPrompt">You are my GitHub-capable agent. Run the Creamlon Postcard agent checkout.
 
 Use my authenticated GitHub account. First confirm my GitHub login through the GitHub API or your GitHub integration. Do not rely on a manually typed login unless GitHub auth is unavailable.
@@ -370,7 +369,7 @@ receipt_path: .creamlon-inbox/purchases/&lt;payment_intent_id&gt;.json
     </main>
 
     <script>
-      const copyButtons = document.querySelectorAll("#copyPrompt, .copy-action");
+      const copyButtons = document.querySelectorAll(".copy-action");
       const copyState = document.querySelector("#copyState");
       const agentPrompt = document.querySelector("#agentPrompt");
 
