@@ -78,6 +78,10 @@ Purchase receipt:
 }
 ```
 
+For the demo vendor, `payment_intent_id` must use the shape
+`pi_demo_YYYYMMDD_<buyer-login>`. The buyer suffix must match the GitHub login
+that opens the public redeem Issue.
+
 ## Public Purchase Redeem Issue
 
 Open an Issue in `imjszhang/creamlon-postcard` with this body:
@@ -100,7 +104,8 @@ The public Issue must never include the complete `crv1_...` credential.
 The seller agent validates the public Issue, reads the receipt from the private
 inbox, creates a one-time Creamlon credential, writes the complete credential
 back to the private inbox, and comments publicly with only the `credential_id`
-and inbox path.
+and inbox path. Demo redeem is lightly rate-limited per buyer and private inbox;
+successful redeem Issues are marked with the `redeemed` label.
 
 Credential delivery file:
 

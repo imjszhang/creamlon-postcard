@@ -7,6 +7,15 @@ import { spawnSync } from 'node:child_process';
 const DEFAULT_REPO = 'imjszhang/creamlon-postcard';
 const DEFAULT_PROVIDER = 'github-pages-demo-vendor';
 const DEFAULT_CAPABILITY_ID = 'echo-cred';
+const REDEEMED_LABEL = 'redeemed';
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const REDEEM_LIMITS = {
+  buyerPerHour: 1,
+  buyerPerDay: 3,
+  inboxPerHour: 1,
+  inboxPerDay: 3,
+};
 
 function usage() {
   return `Usage: node scripts/redeem-purchase.mjs --issue <number> [options]
@@ -178,6 +187,15 @@ async function commentIssue(repoSlug, issueNumber, body, token) {
   });
 }
 
+async function addIssueLabels(repoSlug, issueNumber, labels, token) {
+  const { owner, repo } = parseRepoSlug(repoSlug);
+  return githubJson(`https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/labels`, token, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ labels }),
+  });
+}
+
 function parsePurchaseIssue(body) {
   const fencedYaml = /```(?:yaml|yml)\s*\r?\n([\s\S]*?)```/i.exec(body);
   const source = fencedYaml ? fencedYaml[1] : body;
@@ -247,6 +265,68 @@ function assertReceiptPath(filePath) {
   return value;
 }
 
+function assertDemoPaymentIntentId(paymentIntentId, buyerLogin) {
+  const match = /^pi_demo_(\d{8})_([A-Za-z0-9-]{1,39})$/.exec(paymentIntentId);
+  if (!match) {
+    throw new Error('payment_intent_id must be pi_demo_YYYYMMDD_<buyer-login>.');
+  }
+  if (!sameLogin(match[2], buyerLogin)) {
+    throw new Error('payment_intent_id buyer suffix does not match buyer.');
+  }
+  return paymentIntentId;
+}
+
+function validIssuedAt(value) {
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : null;
+}
+
+function countRecentIssuances(store, predicate, windowMs, nowMs) {
+  return store.issuances.filter((item) => {
+    const issuedAt = validIssuedAt(item.issued_at);
+    return issuedAt !== null && nowMs - issuedAt >= 0 && nowMs - issuedAt <= windowMs && predicate(item);
+  }).length;
+}
+
+function issuanceBuyerLogin(item) {
+  try {
+    return githubPrincipalLogin(item.buyer, 'issuance.buyer');
+  } catch {
+    return null;
+  }
+}
+
+function sameIssuanceRepo(itemRepo, repoSlug) {
+  try {
+    return sameRepoSlug(itemRepo, repoSlug);
+  } catch {
+    return false;
+  }
+}
+
+function assertRedeemRateLimit(store, buyerLogin, inboxRepo, now = new Date()) {
+  const nowMs = now.getTime();
+  const sameBuyer = (item) => sameLogin(issuanceBuyerLogin(item), buyerLogin);
+  const sameInbox = (item) => sameIssuanceRepo(item.inbox_repo, inboxRepo);
+  const buyerHour = countRecentIssuances(store, sameBuyer, HOUR_MS, nowMs);
+  const buyerDay = countRecentIssuances(store, sameBuyer, DAY_MS, nowMs);
+  const inboxHour = countRecentIssuances(store, sameInbox, HOUR_MS, nowMs);
+  const inboxDay = countRecentIssuances(store, sameInbox, DAY_MS, nowMs);
+
+  if (buyerHour >= REDEEM_LIMITS.buyerPerHour) {
+    throw new Error(`Redeem rate limit exceeded for buyer ${buyerLogin}: ${REDEEM_LIMITS.buyerPerHour} per hour.`);
+  }
+  if (buyerDay >= REDEEM_LIMITS.buyerPerDay) {
+    throw new Error(`Redeem rate limit exceeded for buyer ${buyerLogin}: ${REDEEM_LIMITS.buyerPerDay} per day.`);
+  }
+  if (inboxHour >= REDEEM_LIMITS.inboxPerHour) {
+    throw new Error(`Redeem rate limit exceeded for inbox ${inboxRepo}: ${REDEEM_LIMITS.inboxPerHour} per hour.`);
+  }
+  if (inboxDay >= REDEEM_LIMITS.inboxPerDay) {
+    throw new Error(`Redeem rate limit exceeded for inbox ${inboxRepo}: ${REDEEM_LIMITS.inboxPerDay} per day.`);
+  }
+}
+
 function validatePurchase(request, receipt, inboxManifest, publicRepo, issueAuthor) {
   const type = assertField(request, 'type');
   if (type !== 'purchase-redeem') throw new Error(`Unsupported request type: ${type}`);
@@ -266,6 +346,7 @@ function validatePurchase(request, receipt, inboxManifest, publicRepo, issueAuth
   if (!sameLogin(inboxOwner, buyerLogin)) {
     throw new Error('Inbox repository owner does not match buyer.');
   }
+  assertDemoPaymentIntentId(paymentIntentId, buyerLogin);
 
   if (receipt.type !== 'purchase_receipt') throw new Error('Receipt type must be purchase_receipt.');
   if (receipt.provider !== provider) throw new Error('Receipt provider does not match request.');
@@ -352,6 +433,11 @@ async function commentIssuedCredential(publicRepo, issueNumber, issuance, token)
   ].join('\n'), token);
 }
 
+async function markIssueRedeemed(publicRepo, issueNumber, issuance, token) {
+  await addIssueLabels(publicRepo, issueNumber, [REDEEMED_LABEL], token);
+  issuance.redeemed_label_at = new Date().toISOString();
+}
+
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
   if (opts.help) {
@@ -390,21 +476,30 @@ async function main() {
   const store = readIssuanceStore(storePath);
   const existing = store.issuances.find((item) => item.payment_intent_id === paymentIntentId);
   if (existing) {
-    if (existing.public_comment_url || existing.commented_at) {
+    if ((existing.public_comment_url || existing.commented_at) && existing.redeemed_label_at) {
       console.log(`[skip] ${paymentIntentId} already issued as ${existing.credential_id}.`);
       return;
     }
     if (opts.dryRun) {
-      console.log(`[ok] ${paymentIntentId} is valid and would repair the missing public Issue comment.`);
+      console.log(`[ok] ${paymentIntentId} is valid and would repair missing public Issue metadata.`);
       return;
     }
-    const comment = await commentIssuedCredential(publicRepo, opts.issue, existing, token);
-    existing.public_comment_url = comment?.html_url || null;
-    existing.commented_at = new Date().toISOString();
+    if (!existing.public_comment_url && !existing.commented_at) {
+      const comment = await commentIssuedCredential(publicRepo, opts.issue, existing, token);
+      existing.public_comment_url = comment?.html_url || null;
+      existing.commented_at = new Date().toISOString();
+      writeIssuanceStore(storePath, store);
+    }
+    if (!existing.redeemed_label_at) {
+      await markIssueRedeemed(publicRepo, opts.issue, existing, token);
+    }
     writeIssuanceStore(storePath, store);
-    console.log(`[ok] Repaired public Issue comment for ${existing.credential_id}.`);
+    console.log(`[ok] Repaired public Issue metadata for ${existing.credential_id}.`);
     return;
   }
+
+  const buyerLogin = githubPrincipalLogin(request.buyer, 'buyer');
+  assertRedeemRateLimit(store, buyerLogin, inboxRepo);
 
   const expiresAt = new Date(Date.now() + opts.expiresSeconds * 1000).toISOString();
   if (opts.dryRun) {
@@ -451,6 +546,8 @@ async function main() {
   const comment = await commentIssuedCredential(publicRepo, opts.issue, issuance, token);
   issuance.public_comment_url = comment?.html_url || null;
   issuance.commented_at = new Date().toISOString();
+  writeIssuanceStore(storePath, store);
+  await markIssueRedeemed(publicRepo, opts.issue, issuance, token);
   writeIssuanceStore(storePath, store);
 
   console.log(`[ok] Issued ${credential.credential_id} to ${inboxRepo}:${credentialPath}.`);

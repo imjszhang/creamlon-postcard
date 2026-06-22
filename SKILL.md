@@ -91,6 +91,10 @@ private inbox, for example:
 .creamlon-inbox/purchases/pi_demo_YYYYMMDD_your-github-login.json
 ```
 
+The demo `payment_intent_id` must be `pi_demo_YYYYMMDD_<your-github-login>` so
+the seller script can bind the receipt to the GitHub account opening the public
+redeem Issue.
+
 ### 4. Open the Public Purchase Redeem Issue
 
 Open a GitHub Issue in `imjszhang/creamlon-postcard` using the body shape from
@@ -109,7 +113,9 @@ receipt_path: .creamlon-inbox/purchases/pi_demo_YYYYMMDD_your-github-login.json
 
 Wait for the seller agent to comment with `credential_id` and a private inbox
 credential path. Read the complete `crv1_...` only from the private inbox. Keep
-it private and do not paste it into public logs or Issues.
+it private and do not paste it into public logs or Issues. The seller marks a
+successful redeem Issue with the `redeemed` label; demo redeem is lightly
+rate-limited per buyer and private inbox.
 
 ### 5. Submit the Credential Task
 

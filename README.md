@@ -54,6 +54,10 @@ inbox repo, issue the credential:
 node scripts/redeem-purchase.mjs --issue <purchase-issue-number>
 ```
 
+The demo redeem script expects `payment_intent_id` values like
+`pi_demo_YYYYMMDD_<buyer-login>`, applies a small per-buyer/private-inbox rate
+limit, and marks successful redeem Issues with the `redeemed` label.
+
 Then run the auto-deliver loop or a single pass:
 
 ```bash
