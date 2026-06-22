@@ -58,6 +58,8 @@ Confirm the manifest includes:
 Create a dedicated private GitHub repository for this node, such as
 `your-github-login/creamlon-inbox-postcard`. Grant the seller GitHub account
 write access. Do not use a repository that contains unrelated code or secrets.
+The public Postcard repository is the request and trust surface; credentials,
+prompts, and private artifacts flow through the buyer-owned inbox.
 
 Write this file:
 
@@ -166,3 +168,11 @@ Issue, but the node's `watch` validation should reject it with
 - Use only a dedicated private inbox repository for credentials, prompts, and
   private postcard artifacts.
 - Public trust files live in `.creamlon/trust/`.
+
+## Error Handling
+
+When an e2e or agent-to-agent run fails, continue only from the structured
+failure summary emitted by the runner or from `creamlon caller inbox check`.
+If the summary does not list a recovery action for the observed state, stop and
+ask a maintainer to decide the next scenario step. Keep recovery actions scoped
+to the buyer-owned inbox, public Issues, and generated e2e artifacts.
