@@ -126,6 +126,12 @@ The helper writes `.creamlon-inbox/requests/<request_id>/input.txt`, submits
 only `input.digest`, and adds `extensions.postcard_private_input` so the
 operator can read the private input from the issued inbox.
 
+For e2e and agent-to-agent runs, failure recovery is driven by the runner's
+structured failure summary or by `creamlon caller inbox check`. The normal
+Postcard permission model has two GitHub surfaces: public Issues on this melon
+repository, and a separate buyer-owned private inbox for credentials, prompts,
+and private delivery artifacts.
+
 To issue a local credential by hand:
 
 ```bash
