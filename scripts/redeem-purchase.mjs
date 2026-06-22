@@ -68,6 +68,9 @@ function loadEnvFile(repoPath) {
 }
 
 function parseRepoSlug(slug) {
+  if (typeof slug !== 'string') {
+    throw new Error(`Repository must be owner/repo: ${slug}`);
+  }
   const parts = slug.split('/');
   if (parts.length !== 2 || !parts[0] || !parts[1]) {
     throw new Error(`Repository must be owner/repo: ${slug}`);
@@ -108,6 +111,15 @@ async function readGitHubFile(repoSlug, filePath, token) {
   return Buffer.from(file.content, file.encoding || 'base64').toString('utf8');
 }
 
+async function readOptionalGitHubFile(repoSlug, filePath, token) {
+  try {
+    return await readGitHubFile(repoSlug, filePath, token);
+  } catch (error) {
+    if (error.message.includes('GitHub API failed: 404')) return null;
+    throw error;
+  }
+}
+
 async function writeGitHubFile(repoSlug, filePath, content, message, token) {
   const { owner, repo } = parseRepoSlug(repoSlug);
   const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
@@ -129,6 +141,34 @@ async function writeGitHubFile(repoSlug, filePath, content, message, token) {
   });
 }
 
+async function createOrVerifyGitHubFile(repoSlug, filePath, content, message, token) {
+  const existing = await readOptionalGitHubFile(repoSlug, filePath, token);
+  if (existing !== null) {
+    if (existing !== content) {
+      throw new Error(`${repoSlug}:${filePath} already exists with different content.`);
+    }
+    return null;
+  }
+
+  const { owner, repo } = parseRepoSlug(repoSlug);
+  const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+  try {
+    return await githubJson(`https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`, token, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        message,
+        content: Buffer.from(content, 'utf8').toString('base64'),
+      }),
+    });
+  } catch (error) {
+    if (!error.message.includes('GitHub API failed: 422')) throw error;
+    const racedExisting = await readOptionalGitHubFile(repoSlug, filePath, token);
+    if (racedExisting === content) return null;
+    throw error;
+  }
+}
+
 async function commentIssue(repoSlug, issueNumber, body, token) {
   const { owner, repo } = parseRepoSlug(repoSlug);
   return githubJson(`https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}/comments`, token, {
@@ -139,14 +179,19 @@ async function commentIssue(repoSlug, issueNumber, body, token) {
 }
 
 function parsePurchaseIssue(body) {
-  const source = body.replace(/```(?:yaml|yml)?\n([\s\S]*?)```/i, '$1');
+  const fencedYaml = /```(?:yaml|yml)\s*\r?\n([\s\S]*?)```/i.exec(body);
+  const source = fencedYaml ? fencedYaml[1] : body;
   const parsed = {};
+  const seen = new Set();
   for (const line of source.split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed || trimmed.startsWith('#')) continue;
     const match = /^([A-Za-z0-9_.-]+):\s*(.*?)\s*$/.exec(trimmed);
     if (!match) continue;
-    parsed[match[1]] = unquote(match[2]);
+    const key = match[1];
+    if (seen.has(key)) throw new Error(`Duplicate purchase field: ${key}`);
+    seen.add(key);
+    parsed[key] = unquote(match[2]);
   }
   return parsed;
 }
@@ -169,6 +214,37 @@ function githubPrincipalLogin(value, field) {
 
 function sameLogin(left, right) {
   return String(left || '').toLowerCase() === String(right || '').toLowerCase();
+}
+
+function sameRepoSlug(left, right) {
+  const leftRepo = parseRepoSlug(left);
+  const rightRepo = parseRepoSlug(right);
+  return sameLogin(leftRepo.owner, rightRepo.owner) && sameLogin(leftRepo.repo, rightRepo.repo);
+}
+
+function assertIssueIsRedeemable(issue) {
+  if (issue?.pull_request) throw new Error('Purchase redeem target must be an Issue, not a pull request.');
+  if (issue?.state !== 'open') throw new Error('Purchase redeem Issue must be open.');
+  if (typeof issue?.user?.login !== 'string' || !issue.user.login.trim()) {
+    throw new Error('Purchase redeem Issue is missing an author login.');
+  }
+  return issue.user.login.trim();
+}
+
+function assertReceiptPath(filePath) {
+  const value = String(filePath || '').trim();
+  const prefix = '.creamlon-inbox/purchases/';
+  if (
+    !value.startsWith(prefix)
+    || !value.endsWith('.json')
+    || value.includes('\\')
+    || value.startsWith('/')
+    || /^[A-Za-z]:/.test(value)
+    || value.split('/').some((part) => part === '..' || part === '')
+  ) {
+    throw new Error('receipt_path must be a JSON file under .creamlon-inbox/purchases/.');
+  }
+  return value;
 }
 
 function validatePurchase(request, receipt, inboxManifest, publicRepo, issueAuthor) {
@@ -196,11 +272,17 @@ function validatePurchase(request, receipt, inboxManifest, publicRepo, issueAuth
   if (receipt.status !== 'paid') throw new Error('Receipt is not paid.');
   if (receipt.payment_intent_id !== paymentIntentId) throw new Error('Receipt payment_intent_id does not match request.');
   if (receipt.capability_id !== capabilityId) throw new Error('Receipt capability_id does not match request.');
-  if (receipt.buyer !== buyer) throw new Error('Receipt buyer does not match request.');
+  if (!sameLogin(githubPrincipalLogin(receipt.buyer, 'receipt.buyer'), buyerLogin)) {
+    throw new Error('Receipt buyer does not match request.');
+  }
 
   if (inboxManifest.type !== 'creamlon_private_inbox') throw new Error('Inbox manifest type must be creamlon_private_inbox.');
-  if (inboxManifest.owner !== buyer) throw new Error('Inbox owner does not match buyer.');
-  if (inboxManifest.public_request_repo !== publicRepo) throw new Error('Inbox public_request_repo does not match seller repo.');
+  if (!sameLogin(githubPrincipalLogin(inboxManifest.owner, 'inbox.owner'), buyerLogin)) {
+    throw new Error('Inbox owner does not match buyer.');
+  }
+  if (!sameRepoSlug(inboxManifest.public_request_repo, publicRepo)) {
+    throw new Error('Inbox public_request_repo does not match seller repo.');
+  }
 }
 
 function readIssuanceStore(storePath) {
@@ -239,15 +321,35 @@ function issueCredential(repoPath, creamlonPath, capabilityId, expiresAt, env) {
   });
   const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
   if (result.status !== 0) throw new Error(`creamlon credential create failed.\n${output}`);
+  let parsed;
   try {
-    return JSON.parse(result.stdout);
+    parsed = JSON.parse(result.stdout);
   } catch (error) {
     throw new Error(`creamlon credential create returned invalid JSON: ${error.message}\n${output}`);
   }
+  const credentialId = assertField(parsed, 'credential_id');
+  const credential = assertField(parsed, 'credential');
+  if (!/^crv1_[^.]+\..+/.test(credential)) {
+    throw new Error(`creamlon credential create returned invalid credential payload.\n${output}`);
+  }
+  return { ...parsed, credential_id: credentialId, credential };
 }
 
 function hashJson(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+async function commentIssuedCredential(publicRepo, issueNumber, issuance, token) {
+  return commentIssue(publicRepo, issueNumber, [
+    'Creamlon Postcard ticket issued.',
+    '',
+    `- credential_id: ${issuance.credential_id}`,
+    `- capability_id: ${issuance.capability_id || DEFAULT_CAPABILITY_ID}`,
+    `- private_inbox: ${issuance.inbox_repo}`,
+    `- credential_path: ${issuance.credential_path}`,
+    '',
+    'The complete credential was written only to the buyer private inbox.',
+  ].join('\n'), token);
 }
 
 async function main() {
@@ -274,20 +376,33 @@ async function main() {
   }
 
   const issue = await fetchIssue(publicRepo, opts.issue, token);
+  const issueAuthor = assertIssueIsRedeemable(issue);
   const request = parsePurchaseIssue(issue.body || '');
   const inboxRepo = assertField(request, 'inbox_repo');
-  const receiptPath = assertField(request, 'receipt_path');
+  const receiptPath = assertReceiptPath(assertField(request, 'receipt_path'));
   const paymentIntentId = assertField(request, 'payment_intent_id');
   const manifestPath = '.creamlon-inbox/manifest.json';
   const receipt = JSON.parse(await readGitHubFile(inboxRepo, receiptPath, token));
   const inboxManifest = JSON.parse(await readGitHubFile(inboxRepo, manifestPath, token));
-  validatePurchase(request, receipt, inboxManifest, publicRepo, issue.user?.login);
+  validatePurchase(request, receipt, inboxManifest, publicRepo, issueAuthor);
 
   const storePath = path.join(repoPath, '.data', 'private-inbox-issuances.json');
   const store = readIssuanceStore(storePath);
   const existing = store.issuances.find((item) => item.payment_intent_id === paymentIntentId);
   if (existing) {
-    console.log(`[skip] ${paymentIntentId} already issued as ${existing.credential_id}.`);
+    if (existing.public_comment_url || existing.commented_at) {
+      console.log(`[skip] ${paymentIntentId} already issued as ${existing.credential_id}.`);
+      return;
+    }
+    if (opts.dryRun) {
+      console.log(`[ok] ${paymentIntentId} is valid and would repair the missing public Issue comment.`);
+      return;
+    }
+    const comment = await commentIssuedCredential(publicRepo, opts.issue, existing, token);
+    existing.public_comment_url = comment?.html_url || null;
+    existing.commented_at = new Date().toISOString();
+    writeIssuanceStore(storePath, store);
+    console.log(`[ok] Repaired public Issue comment for ${existing.credential_id}.`);
     return;
   }
 
@@ -310,7 +425,7 @@ async function main() {
     issued_by: `github:${publicRepo}`,
     purchase_issue: `${publicRepo}#${opts.issue}`,
   };
-  await writeGitHubFile(
+  await createOrVerifyGitHubFile(
     inboxRepo,
     credentialPath,
     `${JSON.stringify(delivery, null, 2)}\n`,
@@ -318,7 +433,7 @@ async function main() {
     token,
   );
 
-  store.issuances.push({
+  const issuance = {
     payment_intent_id: paymentIntentId,
     credential_id: credential.credential_id,
     capability_id: DEFAULT_CAPABILITY_ID,
@@ -329,19 +444,14 @@ async function main() {
     receipt_hash: hashJson(receipt),
     issued_at: new Date().toISOString(),
     expires_at: expiresAt,
-  });
+  };
+  store.issuances.push(issuance);
   writeIssuanceStore(storePath, store);
 
-  await commentIssue(publicRepo, opts.issue, [
-    'Creamlon Postcard ticket issued.',
-    '',
-    `- credential_id: ${credential.credential_id}`,
-    `- capability_id: ${DEFAULT_CAPABILITY_ID}`,
-    `- private_inbox: ${inboxRepo}`,
-    `- credential_path: ${credentialPath}`,
-    '',
-    'The complete credential was written only to the buyer private inbox.',
-  ].join('\n'), token);
+  const comment = await commentIssuedCredential(publicRepo, opts.issue, issuance, token);
+  issuance.public_comment_url = comment?.html_url || null;
+  issuance.commented_at = new Date().toISOString();
+  writeIssuanceStore(storePath, store);
 
   console.log(`[ok] Issued ${credential.credential_id} to ${inboxRepo}:${credentialPath}.`);
 }
