@@ -2,11 +2,12 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
 const DEFAULT_REPO = 'imjszhang/creamlon-postcard';
 const DEFAULT_PROVIDER = 'github-pages-demo-vendor';
-const DEFAULT_CAPABILITY_ID = 'echo-cred';
+const DEFAULT_CAPABILITY_ID = 'postcard';
 const REDEEMED_LABEL = 'redeemed';
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -416,6 +417,20 @@ function issueCredential(repoPath, creamlonPath, capabilityId, expiresAt, env) {
   return { ...parsed, credential_id: credentialId, credential };
 }
 
+async function assertManifestCredentialCapability(repoPath, creamlonPath, capabilityId) {
+  const manifestPath = path.join(repoPath, '.creamlon', 'manifest.yaml');
+  const manifestLib = path.join(creamlonPath, 'lib', 'manifest.mjs');
+  const mod = await import(pathToFileURL(manifestLib).href);
+  const manifest = mod.parseManifest(readFileSync(manifestPath, 'utf8'));
+  const capability = manifest.capabilities.find((item) => item.id === capabilityId);
+  if (!capability) {
+    throw new Error(`Manifest does not declare capability_id: ${capabilityId}`);
+  }
+  if (capability.access?.mode !== 'credential') {
+    throw new Error(`Manifest capability ${capabilityId} must use access.mode: credential.`);
+  }
+}
+
 function hashJson(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
@@ -460,6 +475,7 @@ async function main() {
   if (!existsSync(path.join(creamlonPath, 'bin', 'creamlon.mjs'))) {
     throw new Error(`Creamlon CLI not found at ${creamlonPath}`);
   }
+  await assertManifestCredentialCapability(repoPath, creamlonPath, DEFAULT_CAPABILITY_ID);
 
   const issue = await fetchIssue(publicRepo, opts.issue, token);
   const issueAuthor = assertIssueIsRedeemable(issue);

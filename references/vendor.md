@@ -8,7 +8,7 @@ buyer-owned private inbox instead. See
 ## Endpoint
 
 ```http
-POST http://localhost:8787/buy/echo-cred
+POST http://localhost:8787/buy/postcard
 content-type: application/json
 ```
 
@@ -29,7 +29,7 @@ Successful response:
 {
   "credential": "crv1_<id>.<secret>",
   "credential_id": "<id>",
-  "capability_id": "echo-cred",
+  "capability_id": "postcard",
   "expires_at": "2026-06-21T00:00:00.000Z",
   "flavor": "Postcard ticket sealed for local-dev."
 }
@@ -56,7 +56,7 @@ Use a short source tag:
 
 ## Local MVP Limits
 
-- The vendor binds credentials to `echo-cred`.
+- The vendor binds credentials to `postcard`.
 - It stores issuance records under `.data/issuance.json`.
 - It rate-limits by GitHub login and IP in memory.
 - It is intended for localhost testing. Public agent flows should use the

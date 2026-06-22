@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{headline}}</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --cream: #fff7e8;
+        --ink: #3b2b24;
+        --accent: #d98666;
+        --accent-dark: #9d5a49;
+        --paper: #fffaf1;
+        --line: rgba(59, 43, 36, 0.18);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        width: 1200px;
+        height: 800px;
+        overflow: hidden;
+        background:
+          radial-gradient(circle at 16% 18%, rgba(255, 202, 155, 0.5), transparent 25%),
+          radial-gradient(circle at 85% 28%, rgba(255, 226, 164, 0.6), transparent 30%),
+          linear-gradient(135deg, #fff4df 0%, #ffe3cd 52%, #f7c5b8 100%);
+        font-family: "Segoe UI", Arial, sans-serif;
+        color: var(--ink);
+      }
+
+      .postcard {
+        position: relative;
+        width: 1120px;
+        height: 720px;
+        margin: 40px;
+        padding: 54px 62px;
+        border: 1px solid rgba(255, 255, 255, 0.9);
+        border-radius: 34px;
+        background:
+          linear-gradient(90deg, transparent 0 53%, var(--line) 53% calc(53% + 2px), transparent calc(53% + 2px)),
+          repeating-linear-gradient(0deg, transparent 0 58px, rgba(59, 43, 36, 0.08) 59px 60px),
+          var(--paper);
+        box-shadow: 0 28px 70px rgba(120, 65, 45, 0.26);
+      }
+
+      .stamp {
+        position: absolute;
+        top: 52px;
+        right: 56px;
+        width: 146px;
+        height: 116px;
+        display: grid;
+        place-items: center;
+        border: 3px dashed rgba(157, 90, 73, 0.5);
+        border-radius: 18px;
+        color: var(--accent-dark);
+        font-weight: 800;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+      }
+
+      .art {
+        position: absolute;
+        left: 64px;
+        top: 76px;
+        width: 468px;
+        height: 354px;
+        border-radius: 28px;
+        background:
+          radial-gradient(circle at 34% 34%, rgba(255, 255, 255, 0.95) 0 9%, transparent 10%),
+          radial-gradient(circle at 58% 55%, rgba(255, 238, 154, 0.95) 0 14%, transparent 15%),
+          linear-gradient(145deg, #f7a88c, #ffe5ae 48%, #a6d5bf);
+        overflow: hidden;
+      }
+
+      .art::before,
+      .art::after {
+        content: "";
+        position: absolute;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.68);
+      }
+
+      .art::before {
+        width: 520px;
+        height: 160px;
+        left: -35px;
+        bottom: -68px;
+      }
+
+      .art::after {
+        width: 220px;
+        height: 220px;
+        right: -48px;
+        top: -48px;
+      }
+
+      .theme {
+        position: absolute;
+        left: 92px;
+        top: 462px;
+        width: 410px;
+        color: var(--accent-dark);
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+
+      .message {
+        position: absolute;
+        right: 72px;
+        top: 206px;
+        width: 430px;
+      }
+
+      h1 {
+        margin: 0 0 30px;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 56px;
+        line-height: 1.02;
+        color: var(--accent-dark);
+      }
+
+      .body {
+        font-size: 32px;
+        line-height: 1.34;
+        white-space: pre-wrap;
+      }
+
+      .signature {
+        margin-top: 38px;
+        font-family: Georgia, "Times New Roman", serif;
+        font-size: 34px;
+        color: var(--accent);
+      }
+
+      .footer {
+        position: absolute;
+        left: 64px;
+        bottom: 42px;
+        font-size: 18px;
+        letter-spacing: 0.14em;
+        color: rgba(59, 43, 36, 0.52);
+        text-transform: uppercase;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="postcard">
+      <div class="stamp">Creamlon</div>
+      <section class="art" aria-label="Generated postcard art"></section>
+      <div class="theme">{{theme}}</div>
+      <section class="message">
+        <h1>{{headline}}</h1>
+        <div class="body">{{message}}</div>
+        <div class="signature">{{signature}}</div>
+      </section>
+      <div class="footer">Private postcard delivery</div>
+    </main>
+  </body>
+</html>

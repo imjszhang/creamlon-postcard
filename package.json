@@ -8,11 +8,15 @@
     "vendor": "node vendor/server.mjs",
     "redeem-purchase": "node scripts/redeem-purchase.mjs",
     "auto-deliver": "node scripts/auto-deliver.mjs",
+    "browser:install": "playwright install chromium",
     "site:build": "node tools/build.js",
-    "check": "node --check vendor/server.mjs && node --check scripts/redeem-purchase.mjs && node --check scripts/auto-deliver.mjs && node --check tools/build.js"
+    "check": "node --check vendor/server.mjs && node --check scripts/redeem-purchase.mjs && node --check scripts/submit-private-postcard.mjs && node --check scripts/auto-deliver.mjs && node --check scripts/lib/postcard-renderer.mjs && node --check tools/build.js"
   },
   "engines": {
     "node": ">=18.0.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "^1.61.0"
+  }
 }

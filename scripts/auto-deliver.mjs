@@ -1,11 +1,12 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { renderPostcard, hashText } from './lib/postcard-renderer.mjs';
 
 const DEFAULT_REPO = 'imjszhang/creamlon-postcard';
-const DEFAULT_CAPABILITY_ID = 'echo-cred';
+const DEFAULT_CAPABILITY_ID = 'postcard';
 
 function usage() {
   return `Usage: node scripts/auto-deliver.mjs [options]
@@ -13,7 +14,7 @@ function usage() {
 Options:
   --dry-run                 Parse pending tasks and prepare output plan only.
   --push                    Commit and push public trust files after delivery.
-  --capability-id <id>      Capability to auto-deliver (default: echo-cred).
+  --capability-id <id>      Capability to auto-deliver (default: postcard).
   --limit <n>               Max tasks to process in one run (default: 5).
   --repo <owner/repo>       Override target GitHub repository.
   --repo-path <dir>         Override local node repository path.
@@ -100,6 +101,16 @@ function parseRepoSlug(slug) {
   return { owner: parts[0], repo: parts[1] };
 }
 
+function sameLogin(left, right) {
+  return String(left || '').toLowerCase() === String(right || '').toLowerCase();
+}
+
+function sameRepoSlug(left, right) {
+  const leftRepo = parseRepoSlug(left);
+  const rightRepo = parseRepoSlug(right);
+  return sameLogin(leftRepo.owner, rightRepo.owner) && sameLogin(leftRepo.repo, rightRepo.repo);
+}
+
 async function loadTaskParser(creamlonPath) {
   const taskLib = path.join(creamlonPath, 'lib', 'task.mjs');
   const mod = await import(pathToFileURL(taskLib).href);
@@ -177,10 +188,22 @@ async function writeGitHubFile(repoSlug, filePath, content, message, token) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       message,
-      content: Buffer.from(content, 'utf8').toString('base64'),
+      content: Buffer.isBuffer(content)
+        ? content.toString('base64')
+        : Buffer.from(content, 'utf8').toString('base64'),
       ...(sha ? { sha } : {}),
     }),
   });
+}
+
+async function readGitHubFile(repoSlug, filePath, token) {
+  const { owner, repo } = parseRepoSlug(repoSlug);
+  const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+  const file = await githubJson(`https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`, token);
+  if (file.type !== 'file' || typeof file.content !== 'string') {
+    throw new Error(`${repoSlug}:${filePath} is not a file.`);
+  }
+  return Buffer.from(file.content, file.encoding || 'base64').toString('utf8');
 }
 
 function readPrivateInboxIssuances(nodePath) {
@@ -220,66 +243,119 @@ function commitAndPushTrust(nodePath, issueNumber) {
   console.log(`[ok] Published ${trustDir}.`);
 }
 
-function writePostcardOutput(nodePath, issueNumber, inputValue) {
-  const outDir = path.join(nodePath, '.data', 'auto-deliver');
-  mkdirSync(outDir, { recursive: true });
-  const outFile = path.join(outDir, `issue-${issueNumber}.txt`);
-  const body = [
-    'CREAMLON POSTCARD',
-    '',
-    'Your postcard was sealed by the Creamlon demo node.',
-    '',
-    `Issue: #${issueNumber}`,
-    `Echo: ${inputValue}`,
-    '',
-    'The signed proof binds this output to the original GitHub task.',
-  ].join('\n');
-  writeFileSync(outFile, body, 'utf8');
-  return outFile;
+function assertPrivateInboxPath(filePath, label) {
+  const value = String(filePath || '').trim();
+  if (
+    !value.startsWith('.creamlon-inbox/')
+    || value.includes('\\')
+    || value.startsWith('/')
+    || /^[A-Za-z]:/.test(value)
+    || value.split('/').some((part) => part === '..' || part === '')
+  ) {
+    throw new Error(`${label} must be a safe path under .creamlon-inbox/.`);
+  }
+  return value;
 }
 
-async function writePrivateInboxDelivery(nodePath, publicRepo, issueNumber, parsedTask, outputFile, proof, token) {
+function resolvePrivateInput(nodePath, parsedTask) {
   const credentialId = parsedTask.credential?.credential_id;
-  if (!credentialId) return;
+  if (!credentialId) throw new Error('Task is missing credential_id.');
 
   const issuance = readPrivateInboxIssuances(nodePath)
     .find((item) => item.credential_id === credentialId);
-  if (!issuance?.inbox_repo) return;
+  if (!issuance?.inbox_repo) {
+    throw new Error(`No private inbox issuance found for credential_id ${credentialId}.`);
+  }
 
+  const privateInput = parsedTask.extensions?.postcard_private_input;
+  if (!privateInput || typeof privateInput !== 'object' || Array.isArray(privateInput)) {
+    throw new Error('Task is missing extensions.postcard_private_input.');
+  }
+  if (String(privateInput.version || '') !== '1') {
+    throw new Error('extensions.postcard_private_input.version must be "1".');
+  }
+  const inboxRepo = String(privateInput.inbox_repo || '').trim();
+  if (!sameRepoSlug(inboxRepo, issuance.inbox_repo)) {
+    throw new Error('Private input inbox_repo does not match the issued credential inbox.');
+  }
+  const inputPath = assertPrivateInboxPath(privateInput.input_path, 'input_path');
+  const expectedInputPath = `.creamlon-inbox/requests/${parsedTask.request_id}/input.txt`;
+  if (inputPath !== expectedInputPath) {
+    throw new Error(`input_path must match the task request_id: ${expectedInputPath}.`);
+  }
+
+  return { credentialId, issuance, inboxRepo, inputPath };
+}
+
+async function fetchPrivateInput(nodePath, parsedTask, token) {
+  if (!parsedTask.input?.digest) throw new Error('Private postcard tasks require input.digest.');
+  const privateInput = resolvePrivateInput(nodePath, parsedTask);
+  const inputText = await readGitHubFile(privateInput.inboxRepo, privateInput.inputPath, token);
+  const inputDigest = hashText(inputText);
+  if (inputDigest !== parsedTask.input.digest) {
+    throw new Error(`Private input digest mismatch: expected ${parsedTask.input.digest}, got ${inputDigest}.`);
+  }
+  return { ...privateInput, inputText, inputDigest };
+}
+
+async function writePrivateInboxDeliveryFiles(nodePath, issueNumber, parsedTask, artifacts, token) {
+  const privateInput = resolvePrivateInput(nodePath, parsedTask);
   const basePath = `.creamlon-inbox/deliveries/issue-${issueNumber}`;
-  const resultText = readFileSync(outputFile, 'utf8');
+
+  await writeGitHubFile(
+    privateInput.inboxRepo,
+    `${basePath}/postcard.png`,
+    readFileSync(artifacts.pngPath),
+    `deliver Creamlon postcard image #${issueNumber}`,
+    token,
+  );
+  await writeGitHubFile(
+    privateInput.inboxRepo,
+    `${basePath}/postcard.html`,
+    readFileSync(artifacts.htmlPath, 'utf8'),
+    `deliver Creamlon postcard HTML #${issueNumber}`,
+    token,
+  );
+  await writeGitHubFile(
+    privateInput.inboxRepo,
+    `${basePath}/delivery.json`,
+    artifacts.deliveryJson,
+    `deliver Creamlon postcard manifest #${issueNumber}`,
+    token,
+  );
+  console.log(`[ok] Wrote private postcard artifacts to ${privateInput.inboxRepo}:${basePath}.`);
+}
+
+async function writePrivateInboxProofFiles(nodePath, publicRepo, issueNumber, parsedTask, proof, token) {
+  const privateInput = resolvePrivateInput(nodePath, parsedTask);
+  const basePath = `.creamlon-inbox/deliveries/issue-${issueNumber}`;
   const status = {
     version: '1',
     type: 'postcard_delivery_status',
     issue_number: issueNumber,
-    credential_id: credentialId,
+    credential_id: privateInput.credentialId,
     capability_id: parsedTask.capability_id,
     delivered_at: new Date().toISOString(),
     public_proof_repo: publicRepo,
+    delivery_path: `${basePath}/delivery.json`,
+    postcard_path: `${basePath}/postcard.png`,
   };
 
   await writeGitHubFile(
-    issuance.inbox_repo,
-    `${basePath}/result.txt`,
-    resultText,
-    `deliver Creamlon postcard result #${issueNumber}`,
-    token,
-  );
-  await writeGitHubFile(
-    issuance.inbox_repo,
+    privateInput.inboxRepo,
     `${basePath}/proof.json`,
     `${JSON.stringify(proof, null, 2)}\n`,
     `deliver Creamlon postcard proof #${issueNumber}`,
     token,
   );
   await writeGitHubFile(
-    issuance.inbox_repo,
+    privateInput.inboxRepo,
     `${basePath}/status.json`,
     `${JSON.stringify(status, null, 2)}\n`,
     `deliver Creamlon postcard status #${issueNumber}`,
     token,
   );
-  console.log(`[ok] Wrote private delivery to ${issuance.inbox_repo}:${basePath}.`);
+  console.log(`[ok] Wrote private proof metadata to ${privateInput.inboxRepo}:${basePath}.`);
 }
 
 function maskPathForLog(filePath) {
@@ -347,18 +423,37 @@ async function main() {
       console.log(`[skip] #${task.issue_number} is not text/plain: ${parsed.input?.media_type || 'unknown'}`);
       continue;
     }
-    if (typeof parsed.input?.value !== 'string') {
-      console.log(`[skip] #${task.issue_number} is missing input.value.`);
+    if (!parsed.input?.digest) {
+      console.log(`[skip] #${task.issue_number} is missing private input.digest.`);
+      continue;
+    }
+
+    let privateInput;
+    try {
+      privateInput = await fetchPrivateInput(repoPath, parsed, token);
+    } catch (error) {
+      console.log(`[skip] #${task.issue_number} private input is unavailable: ${error.message}`);
       continue;
     }
 
     if (opts.dryRun) {
-      console.log(`[dry-run] #${task.issue_number} would seal ${parsed.input.value.length} characters.`);
+      console.log(`[dry-run] #${task.issue_number} would render ${privateInput.inputText.length} private characters from ${privateInput.inboxRepo}:${privateInput.inputPath}.`);
       continue;
     }
 
-    const outFile = writePostcardOutput(repoPath, task.issue_number, parsed.input.value);
-    console.log(`[deliver] #${task.issue_number} output=${maskPathForLog(outFile)}`);
+    const basePath = `.creamlon-inbox/deliveries/issue-${task.issue_number}`;
+    const artifacts = await renderPostcard({
+      repoPath,
+      issueNumber: task.issue_number,
+      requestId: parsed.request_id,
+      inputText: privateInput.inputText,
+      inputDigest: privateInput.inputDigest,
+      credentialId: privateInput.credentialId,
+      capabilityId: parsed.capability_id,
+      deliveryBasePath: basePath,
+    });
+    console.log(`[deliver] #${task.issue_number} output=${maskPathForLog(artifacts.deliveryPath)}`);
+    await writePrivateInboxDeliveryFiles(repoPath, task.issue_number, parsed, artifacts, token);
     const delivered = runCreamlon([
       'deliver',
       nodeRepo,
@@ -366,11 +461,11 @@ async function main() {
       '--repo-path',
       repoPath,
       '--output-file',
-      outFile,
+      artifacts.deliveryPath,
       '--pretty',
     ], creamlonPath, cliEnv);
     const proof = parseJsonOutput(delivered, `creamlon deliver #${task.issue_number}`);
-    await writePrivateInboxDelivery(repoPath, nodeRepo, task.issue_number, parsed, outFile, proof, token);
+    await writePrivateInboxProofFiles(repoPath, nodeRepo, task.issue_number, parsed, proof, token);
 
     const status = runCreamlon([
       'status',

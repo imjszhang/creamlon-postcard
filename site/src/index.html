@@ -324,8 +324,8 @@
             <p class="lede">
               Creamlon Postcard demonstrates the paid credential pattern for
               agent work: a buyer-owned private inbox receives the ticket, an
-              <code>echo-cred</code> task burns it, and a signed public proof
-              verifies the result.
+              private prompt becomes a <code>postcard</code> task by digest, and
+              a signed public proof verifies the delivery manifest.
             </p>
             <div class="hero-actions">
               <a class="button primary" href="#instructions">Copy the agent handoff</a>
@@ -354,7 +354,7 @@
                 </div>
                 <div class="ticket-row">
                   <span class="ticket-label">Capability</span>
-                  <code>echo-cred</code>
+                  <code>postcard</code>
                 </div>
                 <div class="ticket-row">
                   <span class="ticket-label">Delivery</span>
@@ -375,7 +375,8 @@
             <p>
               The page is only the handoff. The real authority comes from GitHub
               actions your agent performs: creating the inbox, opening the
-              purchase Issue, and later reading the delivered credential.
+              purchase Issue, writing the private prompt, and later reading the
+              delivered postcard image.
             </p>
           </div>
           <div class="flow">
@@ -392,7 +393,7 @@
             <article class="flow-card">
               <div class="step-number">3</div>
               <h3>Credential proof</h3>
-              <p>The seller writes the ticket to your inbox; the task consumes it and publishes a verifiable Creamlon proof.</p>
+              <p>The seller writes the ticket to your inbox; the task consumes it, renders a private postcard image, and publishes a verifiable Creamlon proof.</p>
             </article>
           </div>
         </section>
@@ -424,7 +425,7 @@ Provider:
 github-pages-demo-vendor
 
 Capability:
-echo-cred
+postcard
 
 Steps:
 1. Determine my authenticated GitHub login as buyer_login.
@@ -448,25 +449,33 @@ Steps:
   "provider": "github-pages-demo-vendor",
   "status": "paid",
   "buyer": "github:&lt;buyer_login&gt;",
-  "capability_id": "echo-cred",
+  "capability_id": "postcard",
   "ref": "postcard-demo",
   "created_at": "&lt;current ISO timestamp&gt;"
 }
 7. Open a public Issue in imjszhang/creamlon-postcard titled:
-[purchase] echo-cred &lt;payment_intent_id&gt;
+[purchase] postcard &lt;payment_intent_id&gt;
 8. Use this Issue body:
 type: purchase-redeem
 version: "1"
 provider: github-pages-demo-vendor
 payment_intent_id: &lt;payment_intent_id&gt;
-capability_id: echo-cred
+capability_id: postcard
 buyer: github:&lt;buyer_login&gt;
 inbox_repo: &lt;buyer_login&gt;/creamlon-inbox-postcard
 receipt_path: .creamlon-inbox/purchases/&lt;payment_intent_id&gt;.json
 9. Wait for the seller to comment with credential_id and credential_path, and mark the Issue with the redeemed label.
 10. Read the complete crv1 credential only from my private inbox.
-11. Submit an echo-cred task to imjszhang/creamlon-postcard with the credential.
-12. Verify the final proof with Creamlon and report signature_ok, binding_ok, issue number, credential_id, and the private inbox delivery path.</pre>
+11. Write my postcard prompt only to .creamlon-inbox/requests/&lt;request_id&gt;/input.txt in the private inbox. Do not put the prompt in a public Issue.
+12. Compute sha256 over the UTF-8 prompt bytes and write .creamlon-inbox/requests/&lt;request_id&gt;/request.json with request_id, capability_id "postcard", input_media_type "text/plain", and input_digest.
+13. Submit a postcard task to imjszhang/creamlon-postcard with media_type text/plain, input.digest, the crv1 credential, and extensions.postcard_private_input:
+extensions:
+  postcard_private_input:
+    version: "1"
+    inbox_repo: &lt;buyer_login&gt;/creamlon-inbox-postcard
+    input_path: .creamlon-inbox/requests/&lt;request_id&gt;/input.txt
+14. Wait for delivery, then read .creamlon-inbox/deliveries/issue-&lt;number&gt;/postcard.png and delivery.json from the private inbox.
+15. Verify the final proof with Creamlon and report signature_ok, binding_ok, issue number, credential_id, delivery.json path, and postcard.png path.</pre>
           </div>
         </section>
 
@@ -475,7 +484,7 @@ receipt_path: .creamlon-inbox/purchases/&lt;payment_intent_id&gt;.json
             <h3>Security model</h3>
             <ul>
               <li>GitHub Pages never sees credentials or GitHub tokens.</li>
-              <li>The full <code>crv1_...</code> ticket is written only to the buyer private inbox.</li>
+              <li>The full <code>crv1_...</code> ticket and private prompt are written only to the buyer private inbox.</li>
               <li>The seller rejects requests where Issue author, buyer, receipt, and inbox owner do not match.</li>
               <li>The private inbox should be dedicated to this purchase.</li>
             </ul>
@@ -487,7 +496,7 @@ receipt_path: .creamlon-inbox/purchases/&lt;payment_intent_id&gt;.json
               <li><span>Seller repo</span><code>imjszhang/creamlon-postcard</code></li>
               <li><span>Seller user</span><code>imjszhang</code></li>
               <li><span>Provider</span><code>github-pages-demo-vendor</code></li>
-              <li><span>Capability</span><code>echo-cred</code></li>
+              <li><span>Capability</span><code>postcard</code></li>
               <li><span>Demo price</span><code>0 POSTCARD</code></li>
             </ul>
           </div>
