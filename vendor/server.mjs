@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
 const defaultCreamlonEntry = resolve(repoRoot, '..', 'js-creamlon', 'bin', 'creamlon.mjs');
+const CAPABILITY_ID = 'postcard';
 
 const config = {
   port: numberEnv('PORT', 8787),
@@ -45,7 +46,7 @@ async function handleRequest(request, response) {
     return;
   }
 
-  if (request.method !== 'POST' || url.pathname !== '/buy/echo-cred') {
+  if (request.method !== 'POST' || url.pathname !== '/buy/postcard') {
     sendJson(response, 404, { error: 'not_found' });
     return;
   }
@@ -66,7 +67,7 @@ async function handleRequest(request, response) {
     issuance_id: randomUUID(),
     created_at: new Date().toISOString(),
     credential_id: credential.credential_id,
-    capability_id: 'echo-cred',
+    capability_id: CAPABILITY_ID,
     github: normalized.github,
     ref: normalized.ref,
     skill: normalized.skill,
@@ -80,7 +81,7 @@ async function handleRequest(request, response) {
   sendJson(response, 200, {
     credential: credential.credential,
     credential_id: credential.credential_id,
-    capability_id: 'echo-cred',
+    capability_id: CAPABILITY_ID,
     expires_at: expiresAt,
     flavor: postcardFlavor(normalized.ref),
   });
@@ -94,7 +95,7 @@ async function createCredential(expiresAt) {
     '--repo-path',
     config.creamlonRepoPath,
     '--capability-id',
-    'echo-cred',
+    CAPABILITY_ID,
     '--expires',
     expiresAt,
     '--pretty',

@@ -41,10 +41,16 @@ Expected layout:
   purchases/
     <payment_intent_id>.json
   credentials/
-    echo-cred_<credential_id>.json
+    postcard_<credential_id>.json
+  requests/
+    <request_id>/
+      input.txt
+      request.json
   deliveries/
     issue-<number>/
-      result.txt
+      postcard.png
+      postcard.html
+      delivery.json
       proof.json
       status.json
 ```
@@ -72,7 +78,7 @@ Purchase receipt:
   "provider": "github-pages-demo-vendor",
   "status": "paid",
   "buyer": "github:buyer-login",
-  "capability_id": "echo-cred",
+  "capability_id": "postcard",
   "ref": "postcard-demo",
   "created_at": "2026-06-21T00:00:00.000Z"
 }
@@ -91,7 +97,7 @@ type: purchase-redeem
 version: "1"
 provider: github-pages-demo-vendor
 payment_intent_id: pi_demo_20260621_buyer
-capability_id: echo-cred
+capability_id: postcard
 buyer: github:buyer-login
 inbox_repo: buyer-login/creamlon-inbox-postcard
 receipt_path: .creamlon-inbox/purchases/pi_demo_20260621_buyer.json
@@ -115,7 +121,7 @@ Credential delivery file:
   "type": "credential_delivery",
   "credential": "crv1_<id>.<secret>",
   "credential_id": "<id>",
-  "capability_id": "echo-cred",
+  "capability_id": "postcard",
   "payment_intent_id": "pi_demo_20260621_buyer",
   "expires_at": "2026-06-21T01:00:00.000Z",
   "issued_by": "github:imjszhang/creamlon-postcard"
@@ -124,6 +130,35 @@ Credential delivery file:
 
 Complete credentials are allowed only in the buyer private inbox. Public Issues,
 comments, logs, and trust files may contain `credential_id` only.
+
+## Private Prompt Submission
+
+The buyer writes the prompt to the private inbox first:
+
+```text
+.creamlon-inbox/requests/<request_id>/input.txt
+```
+
+Then the public task uses `input.digest` and private input metadata:
+
+```yaml
+version: "1"
+request_id: "<request_id>"
+capability_id: postcard
+requester: "github:buyer-login/creamlon-postcard-demo"
+input:
+  media_type: text/plain
+  digest: sha256:<private-input-digest>
+extensions:
+  postcard_private_input:
+    version: "1"
+    inbox_repo: buyer-login/creamlon-inbox-postcard
+    input_path: .creamlon-inbox/requests/<request_id>/input.txt
+```
+
+The operator reads the private input, verifies the digest, renders
+`postcard.png`, and uses `delivery.json` as the Creamlon proof output. Public
+Issues never include the private prompt.
 
 ## Future Paid Upgrade
 

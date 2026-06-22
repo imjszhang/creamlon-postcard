@@ -6,22 +6,14 @@ identity:
   public_key: "kwckaviKJVmQDwSGMISxpMYlkLD-aad8LbW5P0X_8ok"
 status: available
 capabilities:
-  - id: echo
-    description: Free echo postcard smoke test
+  - id: postcard
+    description: Credential-gated private postcard image generation
     input:
       media_types:
         - text/plain
     output:
       media_types:
-        - text/plain
-  - id: echo-cred
-    description: Credential-gated Creamlon Postcard demo
-    input:
-      media_types:
-        - text/plain
-    output:
-      media_types:
-        - text/plain
+        - application/json
     access:
       mode: credential
       units: 1
@@ -37,7 +29,7 @@ extensions:
     instructions: "Open the GitHub Pages demo checkout, create a buyer-owned private inbox repo, write the demo paid receipt there, then open a public purchase-redeem Issue."
     providers:
       - id: github-pages-demo-vendor
-        capability_id: echo-cred
+        capability_id: postcard
         resource_url: https://imjszhang.github.io/creamlon-postcard/
         network: github
         asset: postcard-ticket

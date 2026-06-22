@@ -1,21 +1,23 @@
 # creamlon-postcard
 
 Creamlon Postcard is a playable Creamlon demo: use a GitHub Pages checkout,
-receive a one-time private credential through a buyer-owned GitHub inbox, submit
-an async GitHub task, and verify the signed delivery proof.
+receive a one-time private `postcard` credential through a buyer-owned GitHub
+inbox, submit a private prompt by digest, receive a private `postcard.png`, and
+verify the signed delivery proof.
 
 This repository is a bundled Creamlon melon. Public protocol files live in
 `.creamlon/`; private operator state stays in `.creamlon/runtime/`.
 
 ## What You Will See
 
-1. A buyer agent uses the GitHub Pages demo checkout for `echo-cred`.
+1. A buyer agent uses the GitHub Pages demo checkout for `postcard`.
 2. The buyer creates a private GitHub inbox repo and grants seller write access.
 3. The seller agent validates the demo paid receipt and writes a private
    `crv1_...` credential to the inbox.
-4. The buyer submits a GitHub Issue task with the credential binding.
-5. The operator auto-delivers a sealed postcard response and writes private
-   artifacts back to the inbox.
+4. The buyer writes the postcard prompt to the private inbox and submits a
+   public task with only `input.digest` and credential binding.
+5. The operator reads the private prompt, verifies the digest, renders
+   `postcard.png`, and writes private artifacts back to the inbox.
 6. Anyone can verify `signature_ok` and `binding_ok` from the public proof.
 7. Reusing the same credential is rejected during node validation.
 
@@ -47,6 +49,13 @@ Configure GitHub Pages for this repository to use GitHub Actions as the source.
 The workflow in `.github/workflows/pages.yml` builds `site/src` into `dist` and
 publishes the generated artifact.
 
+Install the Chromium browser used by Playwright before running postcard image
+delivery:
+
+```bash
+npm run browser:install
+```
+
 After a buyer opens a purchase-redeem Issue and grants access to their private
 inbox repo, issue the credential:
 
@@ -61,7 +70,7 @@ limit, and marks successful redeem Issues with the `redeemed` label.
 Then run the auto-deliver loop or a single pass:
 
 ```bash
-node scripts/auto-deliver.mjs --capability-id echo-cred --push --limit 5
+node scripts/auto-deliver.mjs --capability-id postcard --push --limit 5
 ```
 
 Ask an agent to use `SKILL.md`, or inspect the node manually:
@@ -90,7 +99,7 @@ from the operator commands below.
 npx --yes creamlon@0.8.2 watch owner/repo --repo-path . --once --pretty
 npx --yes creamlon@0.8.2 deliver owner/repo <issue-number> \
   --repo-path . \
-  --output-file ./result.txt \
+  --output-file ./delivery.json \
   --pretty
 npx --yes creamlon@0.8.2 status --repo-path .
 ```
@@ -99,9 +108,23 @@ Commit `.creamlon/trust/proofs.log`, `.creamlon/trust/redemptions.log`, and
 `.creamlon/trust/status.json` after delivery. Use
 `npx --yes creamlon@0.8.2 deliver --resume` after an interrupted delivery.
 
-This template accepts free `echo` tasks and credential-gated `echo-cred` tasks.
-The demo payment provider has price `0`, but keeps the checkout, receipt, and
+This template accepts credential-gated `postcard` tasks. The demo payment
+provider has price `0`, but keeps the checkout, receipt, private inbox, and
 credential redemption shape needed for a future paid vendor.
+
+Buyer agents should use the private submit helper instead of public `--input`:
+
+```bash
+node scripts/submit-private-postcard.mjs \
+  --inbox-repo buyer-login/creamlon-inbox-postcard \
+  --requester github:buyer-login/creamlon-postcard-demo \
+  --credential-file ./postcard_credential.json \
+  --input-file ./prompt.txt
+```
+
+The helper writes `.creamlon-inbox/requests/<request_id>/input.txt`, submits
+only `input.digest`, and adds `extensions.postcard_private_input` so the
+operator can read the private input from the issued inbox.
 
 To issue a local credential by hand:
 
@@ -120,8 +143,8 @@ credential-backed delivery.
 - Never commit `.creamlon/runtime/`, `.env`, `.data/`, or complete
   `crv1_...` credentials.
 - Use a dedicated buyer private inbox repo for credentials and private
-  artifacts. Do not mix unrelated code or secrets into that repo.
+  prompts and artifacts. Do not mix unrelated code or secrets into that repo.
 - Commit only public protocol state: `.creamlon/manifest.yaml`,
   `.creamlon/README.md`, and `.creamlon/trust/`.
-- Public Issues and trust logs may contain `credential_id`, but never the full
-  credential secret.
+- Public Issues and trust logs may contain `credential_id`, `input.digest`, and
+  private inbox paths, but never the full credential secret or private prompt.
