@@ -73,6 +73,13 @@ Then run the auto-deliver loop or a single pass:
 node scripts/auto-deliver.mjs --capability-id postcard --push --limit 5
 ```
 
+Auto-delivery renders and signs the delivery locally before writing private
+artifacts to the buyer inbox. By default it removes local `.data/auto-deliver`
+artifacts after successful tasks; failed deliveries keep local artifacts for
+recovery. Use `--keep-artifacts` when debugging successful deliveries too.
+Operator runs also use local `.data/locks/` directories to avoid concurrent
+redemption or delivery of the same purchase/task.
+
 Ask an agent to use `SKILL.md`, or inspect the node manually:
 
 ```bash
@@ -143,6 +150,11 @@ npx --yes creamlon@0.8.2 credential create \
 Keep `.creamlon/runtime/credentials.json` private. Commit
 `.creamlon/trust/redemptions.log` alongside `.creamlon/trust/proofs.log` after
 credential-backed delivery.
+
+For tighter GitHub permissions, set `CREAMLON_PUBLIC_GITHUB_TOKEN` for seller
+repo Issue/trust operations and `CREAMLON_INBOX_GITHUB_TOKEN` for buyer private
+inbox reads/writes. If they are unset, scripts fall back to `GITHUB_TOKEN` or
+`GH_TOKEN` for local demo compatibility.
 
 ## Security
 

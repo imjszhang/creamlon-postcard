@@ -85,6 +85,7 @@ export async function renderPostcard({
   credentialId,
   capabilityId,
   deliveryBasePath,
+  timeoutMs = 120_000,
 }) {
   const outDir = path.join(repoPath, '.data', 'auto-deliver', `issue-${issueNumber}`);
   mkdirSync(outDir, { recursive: true });
@@ -107,14 +108,15 @@ export async function renderPostcard({
 
   let browser;
   try {
-    browser = await chromium.launch();
+    browser = await chromium.launch({ timeout: timeoutMs });
   } catch (error) {
     throw new Error(`Playwright Chromium is required to render postcard.png. Run "npx playwright install chromium" before auto-delivery. ${error.message}`);
   }
   try {
     const page = await browser.newPage({ viewport: { width: 1200, height: 800 }, deviceScaleFactor: 1 });
-    await page.goto(`file://${htmlPath.replace(/\\/g, '/')}`, { waitUntil: 'load' });
-    await page.screenshot({ path: pngPath, type: 'png' });
+    page.setDefaultTimeout(timeoutMs);
+    await page.goto(`file://${htmlPath.replace(/\\/g, '/')}`, { waitUntil: 'load', timeout: timeoutMs });
+    await page.screenshot({ path: pngPath, type: 'png', timeout: timeoutMs });
   } finally {
     await browser.close();
   }

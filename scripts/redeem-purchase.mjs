@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -75,6 +75,14 @@ function loadEnvFile(repoPath) {
     env[key] = value;
   }
   return env;
+}
+
+function tokenSetting(envFile, names) {
+  for (const name of names) {
+    const value = envFile[name] || process.env[name];
+    if (value && value.trim()) return value.trim();
+  }
+  return null;
 }
 
 function parseRepoSlug(slug) {
@@ -435,6 +443,34 @@ function hashJson(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+function safeLockName(value) {
+  return String(value).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 140);
+}
+
+async function withLocalLock(repoPath, scope, key, callback) {
+  const lockDir = path.join(repoPath, '.data', 'locks', `${scope}-${safeLockName(key)}.lock`);
+  mkdirSync(path.dirname(lockDir), { recursive: true });
+  try {
+    mkdirSync(lockDir);
+  } catch (error) {
+    if (error.code === 'EEXIST') {
+      throw new Error(`Another operator process is already handling ${scope} ${key}. Remove ${lockDir.replace(/\\/g, '/')} only after confirming it is stale.`);
+    }
+    throw error;
+  }
+  writeFileSync(path.join(lockDir, 'owner.json'), `${JSON.stringify({
+    scope,
+    key,
+    pid: process.pid,
+    created_at: new Date().toISOString(),
+  }, null, 2)}\n`, 'utf8');
+  try {
+    return await callback();
+  } finally {
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+}
+
 async function commentIssuedCredential(publicRepo, issueNumber, issuance, token) {
   return commentIssue(publicRepo, issueNumber, [
     'Creamlon Postcard ticket issued.',
@@ -462,8 +498,14 @@ async function main() {
 
   const repoPath = path.resolve(opts.repoPath || process.cwd());
   const envFile = loadEnvFile(repoPath);
-  const token = envFile.GITHUB_TOKEN || envFile.GH_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  if (!token) throw new Error('Missing GITHUB_TOKEN or GH_TOKEN.');
+  const legacyToken = tokenSetting(envFile, ['GITHUB_TOKEN', 'GH_TOKEN']);
+  const publicToken = tokenSetting(envFile, ['CREAMLON_PUBLIC_GITHUB_TOKEN', 'POSTCARD_PUBLIC_GITHUB_TOKEN'])
+    || legacyToken;
+  const inboxToken = tokenSetting(envFile, ['CREAMLON_INBOX_GITHUB_TOKEN', 'POSTCARD_INBOX_GITHUB_TOKEN'])
+    || legacyToken;
+  if (!publicToken || !inboxToken) {
+    throw new Error('Missing GitHub token. Set GITHUB_TOKEN/GH_TOKEN, or split CREAMLON_PUBLIC_GITHUB_TOKEN and CREAMLON_INBOX_GITHUB_TOKEN.');
+  }
 
   const publicRepo = opts.repo || envFile.CREAMLON_NODE_REPO || DEFAULT_REPO;
   const creamlonPath = path.resolve(
@@ -477,96 +519,105 @@ async function main() {
   }
   await assertManifestCredentialCapability(repoPath, creamlonPath, DEFAULT_CAPABILITY_ID);
 
-  const issue = await fetchIssue(publicRepo, opts.issue, token);
+  const issue = await fetchIssue(publicRepo, opts.issue, publicToken);
   const issueAuthor = assertIssueIsRedeemable(issue);
   const request = parsePurchaseIssue(issue.body || '');
   const inboxRepo = assertField(request, 'inbox_repo');
   const receiptPath = assertReceiptPath(assertField(request, 'receipt_path'));
   const paymentIntentId = assertField(request, 'payment_intent_id');
   const manifestPath = '.creamlon-inbox/manifest.json';
-  const receipt = JSON.parse(await readGitHubFile(inboxRepo, receiptPath, token));
-  const inboxManifest = JSON.parse(await readGitHubFile(inboxRepo, manifestPath, token));
+  const receipt = JSON.parse(await readGitHubFile(inboxRepo, receiptPath, inboxToken));
+  const inboxManifest = JSON.parse(await readGitHubFile(inboxRepo, manifestPath, inboxToken));
   validatePurchase(request, receipt, inboxManifest, publicRepo, issueAuthor);
 
   const storePath = path.join(repoPath, '.data', 'private-inbox-issuances.json');
-  const store = readIssuanceStore(storePath);
-  const existing = store.issuances.find((item) => item.payment_intent_id === paymentIntentId);
-  if (existing) {
-    if ((existing.public_comment_url || existing.commented_at) && existing.redeemed_label_at) {
-      console.log(`[skip] ${paymentIntentId} already issued as ${existing.credential_id}.`);
-      return;
-    }
-    if (opts.dryRun) {
+  const buyerLogin = githubPrincipalLogin(request.buyer, 'buyer');
+  const expiresAt = new Date(Date.now() + opts.expiresSeconds * 1000).toISOString();
+  if (opts.dryRun) {
+    const store = readIssuanceStore(storePath);
+    const existing = store.issuances.find((item) => item.payment_intent_id === paymentIntentId);
+    if (existing) {
+      if ((existing.public_comment_url || existing.commented_at) && existing.redeemed_label_at) {
+        console.log(`[skip] ${paymentIntentId} already issued as ${existing.credential_id}.`);
+        return;
+      }
       console.log(`[ok] ${paymentIntentId} is valid and would repair missing public Issue metadata.`);
       return;
     }
-    if (!existing.public_comment_url && !existing.commented_at) {
-      const comment = await commentIssuedCredential(publicRepo, opts.issue, existing, token);
-      existing.public_comment_url = comment?.html_url || null;
-      existing.commented_at = new Date().toISOString();
-      writeIssuanceStore(storePath, store);
-    }
-    if (!existing.redeemed_label_at) {
-      await markIssueRedeemed(publicRepo, opts.issue, existing, token);
-    }
-    writeIssuanceStore(storePath, store);
-    console.log(`[ok] Repaired public Issue metadata for ${existing.credential_id}.`);
-    return;
-  }
-
-  const buyerLogin = githubPrincipalLogin(request.buyer, 'buyer');
-  assertRedeemRateLimit(store, buyerLogin, inboxRepo);
-
-  const expiresAt = new Date(Date.now() + opts.expiresSeconds * 1000).toISOString();
-  if (opts.dryRun) {
+    assertRedeemRateLimit(store, buyerLogin, inboxRepo);
     console.log(`[ok] ${paymentIntentId} is valid and would issue ${DEFAULT_CAPABILITY_ID} until ${expiresAt}.`);
     return;
   }
 
-  const credential = issueCredential(repoPath, creamlonPath, DEFAULT_CAPABILITY_ID, expiresAt, { GITHUB_TOKEN: token, GH_TOKEN: token });
-  const credentialPath = `.creamlon-inbox/credentials/${DEFAULT_CAPABILITY_ID}_${credential.credential_id}.json`;
-  const delivery = {
-    version: '1',
-    type: 'credential_delivery',
-    credential: credential.credential,
-    credential_id: credential.credential_id,
-    capability_id: DEFAULT_CAPABILITY_ID,
-    payment_intent_id: paymentIntentId,
-    expires_at: expiresAt,
-    issued_by: `github:${publicRepo}`,
-    purchase_issue: `${publicRepo}#${opts.issue}`,
-  };
-  await createOrVerifyGitHubFile(
-    inboxRepo,
-    credentialPath,
-    `${JSON.stringify(delivery, null, 2)}\n`,
-    `deliver Creamlon credential ${credential.credential_id}`,
-    token,
-  );
+  await withLocalLock(repoPath, 'redeem', paymentIntentId, async () => {
+    const store = readIssuanceStore(storePath);
+    const existing = store.issuances.find((item) => item.payment_intent_id === paymentIntentId);
+    if (existing) {
+      if ((existing.public_comment_url || existing.commented_at) && existing.redeemed_label_at) {
+        console.log(`[skip] ${paymentIntentId} already issued as ${existing.credential_id}.`);
+        return;
+      }
+      if (!existing.public_comment_url && !existing.commented_at) {
+        const comment = await commentIssuedCredential(publicRepo, opts.issue, existing, publicToken);
+        existing.public_comment_url = comment?.html_url || null;
+        existing.commented_at = new Date().toISOString();
+        writeIssuanceStore(storePath, store);
+      }
+      if (!existing.redeemed_label_at) {
+        await markIssueRedeemed(publicRepo, opts.issue, existing, publicToken);
+      }
+      writeIssuanceStore(storePath, store);
+      console.log(`[ok] Repaired public Issue metadata for ${existing.credential_id}.`);
+      return;
+    }
 
-  const issuance = {
-    payment_intent_id: paymentIntentId,
-    credential_id: credential.credential_id,
-    capability_id: DEFAULT_CAPABILITY_ID,
-    buyer: request.buyer,
-    inbox_repo: inboxRepo,
-    credential_path: credentialPath,
-    purchase_issue: opts.issue,
-    receipt_hash: hashJson(receipt),
-    issued_at: new Date().toISOString(),
-    expires_at: expiresAt,
-  };
-  store.issuances.push(issuance);
-  writeIssuanceStore(storePath, store);
+    assertRedeemRateLimit(store, buyerLogin, inboxRepo);
 
-  const comment = await commentIssuedCredential(publicRepo, opts.issue, issuance, token);
-  issuance.public_comment_url = comment?.html_url || null;
-  issuance.commented_at = new Date().toISOString();
-  writeIssuanceStore(storePath, store);
-  await markIssueRedeemed(publicRepo, opts.issue, issuance, token);
-  writeIssuanceStore(storePath, store);
+    const credential = issueCredential(repoPath, creamlonPath, DEFAULT_CAPABILITY_ID, expiresAt, { GITHUB_TOKEN: publicToken, GH_TOKEN: publicToken });
+    const credentialPath = `.creamlon-inbox/credentials/${DEFAULT_CAPABILITY_ID}_${credential.credential_id}.json`;
+    const delivery = {
+      version: '1',
+      type: 'credential_delivery',
+      credential: credential.credential,
+      credential_id: credential.credential_id,
+      capability_id: DEFAULT_CAPABILITY_ID,
+      payment_intent_id: paymentIntentId,
+      expires_at: expiresAt,
+      issued_by: `github:${publicRepo}`,
+      purchase_issue: `${publicRepo}#${opts.issue}`,
+    };
+    await createOrVerifyGitHubFile(
+      inboxRepo,
+      credentialPath,
+      `${JSON.stringify(delivery, null, 2)}\n`,
+      `deliver Creamlon credential ${credential.credential_id}`,
+      inboxToken,
+    );
 
-  console.log(`[ok] Issued ${credential.credential_id} to ${inboxRepo}:${credentialPath}.`);
+    const issuance = {
+      payment_intent_id: paymentIntentId,
+      credential_id: credential.credential_id,
+      capability_id: DEFAULT_CAPABILITY_ID,
+      buyer: request.buyer,
+      inbox_repo: inboxRepo,
+      credential_path: credentialPath,
+      purchase_issue: opts.issue,
+      receipt_hash: hashJson(receipt),
+      issued_at: new Date().toISOString(),
+      expires_at: expiresAt,
+    };
+    store.issuances.push(issuance);
+    writeIssuanceStore(storePath, store);
+
+    const comment = await commentIssuedCredential(publicRepo, opts.issue, issuance, publicToken);
+    issuance.public_comment_url = comment?.html_url || null;
+    issuance.commented_at = new Date().toISOString();
+    writeIssuanceStore(storePath, store);
+    await markIssueRedeemed(publicRepo, opts.issue, issuance, publicToken);
+    writeIssuanceStore(storePath, store);
+
+    console.log(`[ok] Issued ${credential.credential_id} to ${inboxRepo}:${credentialPath}.`);
+  });
 }
 
 main().catch((error) => {
