@@ -75,9 +75,10 @@ node scripts/auto-deliver.mjs --capability-id postcard --push --limit 5
 
 Auto-delivery renders and signs the delivery locally before writing private
 artifacts to the buyer inbox. By default it removes local `.data/auto-deliver`
-artifacts after each task; use `--keep-artifacts` only when debugging. Operator
-runs also use local `.data/locks/` directories to avoid concurrent redemption or
-delivery of the same purchase/task.
+artifacts after successful tasks; failed deliveries keep local artifacts for
+recovery. Use `--keep-artifacts` when debugging successful deliveries too.
+Operator runs also use local `.data/locks/` directories to avoid concurrent
+redemption or delivery of the same purchase/task.
 
 Ask an agent to use `SKILL.md`, or inspect the node manually:
 

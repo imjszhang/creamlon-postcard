@@ -493,6 +493,11 @@ function cleanupArtifacts(artifacts, keepArtifacts) {
   console.log(`[ok] Removed local private artifacts from ${maskPathForLog(artifacts.outDir)}.`);
 }
 
+function keepArtifactsForRecovery(artifacts) {
+  if (!artifacts?.outDir) return;
+  console.log(`[warn] Kept local artifacts for recovery at ${maskPathForLog(artifacts.outDir)}.`);
+}
+
 function delay(ms) {
   return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 }
@@ -635,7 +640,11 @@ async function main() {
         }
         deliveredTask = true;
       } finally {
-        cleanupArtifacts(artifacts, runtime.keepArtifacts);
+        if (deliveredTask) {
+          cleanupArtifacts(artifacts, runtime.keepArtifacts);
+        } else {
+          keepArtifactsForRecovery(artifacts);
+        }
       }
     });
     if (!deliveredTask) continue;
