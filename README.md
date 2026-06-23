@@ -16,10 +16,12 @@ This repository is a bundled Creamlon melon. Public protocol files live in
    `crv1_...` credential to the inbox.
 4. The buyer writes the postcard prompt to the private inbox and submits a
    public task with only `input.digest` and credential binding.
-5. The operator reads the private prompt, verifies the digest, renders
-   `postcard.png`, and writes private artifacts back to the inbox.
-6. Anyone can verify `signature_ok` and `binding_ok` from the public proof.
-7. Reusing the same credential is rejected during node validation.
+5. The operator reads the private prompt, verifies the digest, renders a
+   digest-seeded `postcard.png`, and writes private artifacts back to the inbox.
+6. A public share page is generated without the private message, so the buyer
+   can share a verified delivery card while the full postcard remains private.
+7. Anyone can verify `signature_ok` and `binding_ok` from the public proof.
+8. Reusing the same credential is rejected during node validation.
 
 ## Local Operator Setup
 
@@ -90,13 +92,18 @@ The experimental operator flow is intentionally conservative: it processes one
 task by default, aborts on validation errors instead of skipping ahead, writes a
 local `.data/auto-deliver/issue-*/run-report.json` review report, keeps local
 artifacts by default, and refuses to overwrite existing private inbox delivery
-files unless `--allow-overwrite-private` is explicitly set after review. Use
-`--batch --limit <n>` only after the pending queue has been inspected.
+files unless `--allow-overwrite-private` is explicitly set after review. Each
+render also writes a public, privacy-preserving share page at
+`site/src/postcards/issue-*/` with a deterministic visual fingerprint and Open
+Graph image. Use `--batch --limit <n>` only after the pending queue has been
+inspected.
 Operator runs also use local `.data/locks/` directories to avoid concurrent
 redemption or delivery of the same purchase/task. Add `--push` only when the
 local proof/trust diff has been reviewed and should be published. After
 `--stop-after deliver`, use `--publish-reviewed` so the already-reviewed local
 proof is published without running `creamlon deliver` a second time.
+When `--push` is used, the script commits both `.creamlon/trust/` and the
+corresponding `site/src/postcards/issue-*/` share page.
 
 Ask an agent to use `SKILL.md`, or inspect the node manually:
 
@@ -180,7 +187,8 @@ inbox reads/writes. If they are unset, scripts fall back to `GITHUB_TOKEN` or
   `crv1_...` credentials.
 - Use a dedicated buyer private inbox repo for credentials and private
   prompts and artifacts. Do not mix unrelated code or secrets into that repo.
-- Commit only public protocol state: `.creamlon/manifest.yaml`,
-  `.creamlon/README.md`, and `.creamlon/trust/`.
+- Commit only public protocol and share state: `.creamlon/manifest.yaml`,
+  `.creamlon/README.md`, `.creamlon/trust/`, and privacy-preserving
+  `site/src/postcards/issue-*/` pages.
 - Public Issues and trust logs may contain `credential_id`, `input.digest`, and
   private inbox paths, but never the full credential secret or private prompt.

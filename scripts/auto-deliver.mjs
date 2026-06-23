@@ -371,6 +371,14 @@ function publicTrustDir(nodePath) {
   return 'trust';
 }
 
+function publicShareRelativeDir(issueNumber) {
+  return path.posix.join('site', 'src', 'postcards', `issue-${issueNumber}`);
+}
+
+function publicShareDir(nodePath, issueNumber) {
+  return path.join(nodePath, 'site', 'src', 'postcards', `issue-${issueNumber}`);
+}
+
 function reviewOutDir(nodePath, issueNumber) {
   return path.join(nodePath, '.data', 'auto-deliver', `issue-${issueNumber}`);
 }
@@ -407,17 +415,20 @@ function writeReviewReport(nodePath, issueNumber, report) {
 
 function commitAndPushTrust(nodePath, issueNumber) {
   const trustDir = publicTrustDir(nodePath);
-  const status = runGit(['status', '--porcelain', '--', trustDir], nodePath);
+  const shareDir = publicShareRelativeDir(issueNumber);
+  const status = runGit(['status', '--porcelain', '--', trustDir, shareDir], nodePath);
   if (status.status !== 0) {
     throw new Error(`git status failed.\n${status.stderr || status.stdout}`);
   }
   if (!status.stdout.trim()) {
-    console.log(`[skip] ${trustDir} has no changes to publish.`);
+    console.log(`[skip] ${trustDir} and ${shareDir} have no changes to publish.`);
     return;
   }
 
+  const addPaths = [trustDir];
+  if (existsSync(path.join(nodePath, shareDir))) addPaths.push(shareDir);
   for (const args of [
-    ['add', trustDir],
+    ['add', ...addPaths],
     ['commit', '-m', `chore: publish Creamlon postcard proof #${issueNumber}`],
     ['push'],
   ]) {
@@ -426,7 +437,7 @@ function commitAndPushTrust(nodePath, issueNumber) {
       throw new Error(`git ${args.join(' ')} failed.\n${result.stderr || result.stdout}`);
     }
   }
-  console.log(`[ok] Published ${trustDir}.`);
+  console.log(`[ok] Published ${trustDir} and ${shareDir}.`);
 }
 
 function assertPrivateInboxPath(filePath, label) {
@@ -624,12 +635,22 @@ function assertTaskCanBeDelivered(task, parsedTask, capabilityId) {
 
 function localArtifactPaths(artifacts) {
   if (!artifacts) return {};
-  return {
+  const paths = {
     out_dir: maskPathForLog(artifacts.outDir),
     postcard_html: maskPathForLog(artifacts.htmlPath),
     postcard_png: maskPathForLog(artifacts.pngPath),
     delivery_json: maskPathForLog(artifacts.deliveryPath),
   };
+  if (artifacts.publicShareDir) {
+    paths.public_share_dir = maskPathForLog(artifacts.publicShareDir);
+  }
+  if (artifacts.publicShareImagePath) {
+    paths.public_share_png = maskPathForLog(artifacts.publicShareImagePath);
+  }
+  if (artifacts.publicShareUrl) {
+    paths.public_share_url = artifacts.publicShareUrl;
+  }
+  return paths;
 }
 
 function writeLocalProofFiles(artifacts, publicRepo, issueNumber, parsedTask, privateInput, proof) {
@@ -669,6 +690,7 @@ function readReviewedArtifacts(nodePath, issueNumber) {
     htmlPath: paths.htmlPath,
     pngPath: paths.pngPath,
     deliveryPath: paths.deliveryPath,
+    publicShareDir: publicShareDir(nodePath, issueNumber),
     deliveryJson: readFileSync(paths.deliveryPath, 'utf8'),
     proof: JSON.parse(readFileSync(paths.proofPath, 'utf8')),
     localProofPaths: {
@@ -862,6 +884,7 @@ async function main() {
           credentialId: privateInput.credentialId,
           capabilityId: parsed.capability_id,
           deliveryBasePath: basePath,
+          publicRepo: nodeRepo,
           timeoutMs: runtime.taskTimeoutMs,
         });
         writeReviewReport(repoPath, task.issue_number, {
