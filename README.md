@@ -67,18 +67,36 @@ The demo redeem script expects `payment_intent_id` values like
 `pi_demo_YYYYMMDD_<buyer-login>`, applies a small per-buyer/private-inbox rate
 limit, and marks successful redeem Issues with the `redeemed` label.
 
-Then run the auto-deliver loop or a single pass:
+Then ask an agent to inspect GitHub and run one reviewed delivery pass:
 
 ```bash
-node scripts/auto-deliver.mjs --capability-id postcard --push --limit 5
+# Read the task and private input, verify the digest, and write a review report.
+node scripts/auto-deliver.mjs --capability-id postcard --issue <task-issue-number> --stop-after preflight
+
+# Optional: render local HTML/PNG artifacts for visual review.
+node scripts/auto-deliver.mjs --capability-id postcard --issue <task-issue-number> --stop-after render
+
+# Optional: sign the delivery and stop before publishing private inbox files.
+node scripts/auto-deliver.mjs --capability-id postcard --issue <task-issue-number> --stop-after deliver
+
+# Publish artifacts from a reviewed --stop-after deliver run.
+node scripts/auto-deliver.mjs --capability-id postcard --issue <task-issue-number> --publish-reviewed
+
+# Or perform render, deliver, and private inbox publishing in one reviewed run.
+node scripts/auto-deliver.mjs --capability-id postcard --issue <task-issue-number>
 ```
 
-Auto-delivery renders and signs the delivery locally before writing private
-artifacts to the buyer inbox. By default it removes local `.data/auto-deliver`
-artifacts after successful tasks; failed deliveries keep local artifacts for
-recovery. Use `--keep-artifacts` when debugging successful deliveries too.
+The experimental operator flow is intentionally conservative: it processes one
+task by default, aborts on validation errors instead of skipping ahead, writes a
+local `.data/auto-deliver/issue-*/run-report.json` review report, keeps local
+artifacts by default, and refuses to overwrite existing private inbox delivery
+files unless `--allow-overwrite-private` is explicitly set after review. Use
+`--batch --limit <n>` only after the pending queue has been inspected.
 Operator runs also use local `.data/locks/` directories to avoid concurrent
-redemption or delivery of the same purchase/task.
+redemption or delivery of the same purchase/task. Add `--push` only when the
+local proof/trust diff has been reviewed and should be published. After
+`--stop-after deliver`, use `--publish-reviewed` so the already-reviewed local
+proof is published without running `creamlon deliver` a second time.
 
 Ask an agent to use `SKILL.md`, or inspect the node manually:
 
