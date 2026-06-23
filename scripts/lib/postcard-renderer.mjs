@@ -53,12 +53,19 @@ export function buildPostcardSpec(inputText) {
   };
 }
 
-function fillTemplate(template, spec) {
+function loadLogoDataUri(repoPath) {
+  const logoPath = path.join(repoPath, 'templates', 'assets', 'creamlon-logo.png');
+  const bytes = readFileSync(logoPath);
+  return `data:image/png;base64,${bytes.toString('base64')}`;
+}
+
+function fillTemplate(template, spec, logoSrc) {
   return template
     .replaceAll('{{headline}}', escapeHtml(spec.headline))
     .replaceAll('{{message}}', escapeHtml(spec.message))
     .replaceAll('{{signature}}', escapeHtml(spec.signature))
-    .replaceAll('{{theme}}', escapeHtml(spec.theme));
+    .replaceAll('{{theme}}', escapeHtml(spec.theme))
+    .replaceAll('{{logo_src}}', logoSrc);
 }
 
 export function hashBuffer(buffer) {
@@ -85,7 +92,8 @@ export async function renderPostcard({
   const templatePath = path.join(repoPath, 'templates', 'postcard.html');
   const template = readFileSync(templatePath, 'utf8');
   const spec = buildPostcardSpec(inputText);
-  const html = fillTemplate(template, spec);
+  const logoSrc = loadLogoDataUri(repoPath);
+  const html = fillTemplate(template, spec, logoSrc);
   const htmlPath = path.join(outDir, 'postcard.html');
   const pngPath = path.join(outDir, 'postcard.png');
   writeFileSync(htmlPath, html, 'utf8');
