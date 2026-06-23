@@ -5,320 +5,384 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Creamlon Postcard Agent Checkout</title>
     <meta name="description" content="A one-page agent checkout for Creamlon Postcard: private GitHub inbox delivery, credential-gated tasks, and signed public proofs.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
       :root {
         color-scheme: light;
-        --bg: #faf4e8;
-        --surface: #fffaf1;
-        --surface-soft: #f5efe4;
-        --surface-strong: #efe4d4;
-        --ink: #3b2b24;
-        --muted: rgba(59, 43, 36, 0.66);
-        --line: rgba(59, 43, 36, 0.16);
-        --accent: #cc785c;
-        --accent-strong: #9d5a49;
-        --accent-soft: #f2ded4;
-        --success: #5d8f72;
-        --success-soft: #e8f0e2;
-        --code: #efe6d8;
-        --shadow: 0 24px 70px rgba(120, 65, 45, 0.18);
+
+        /* Brand & accent */
+        --primary: #cc785c;
+        --primary-active: #a9583e;
+        --primary-disabled: #e6dfd8;
+        --accent-teal: #5db8a6;
+        --accent-amber: #e8a55a;
+
+        /* Surfaces */
+        --canvas: #faf9f5;
+        --surface-soft: #f5f0e8;
+        --surface-card: #efe9de;
+        --surface-cream-strong: #e8e0d2;
+        --surface-dark: #181715;
+        --surface-dark-elevated: #252320;
+        --surface-dark-soft: #1f1e1b;
+        --hairline: #e6dfd8;
+        --hairline-soft: #ebe6df;
+
+        /* Text */
+        --ink: #141413;
+        --body-strong: #252523;
+        --body: #3d3d3a;
+        --muted: #6c6a64;
+        --muted-soft: #8e8b82;
+        --on-primary: #ffffff;
+        --on-dark: #faf9f5;
+        --on-dark-soft: #a09d96;
+
+        /* Semantic */
+        --success: #5db872;
+
+        /* Type */
+        --font-display: "Cormorant Garamond", Georgia, "Times New Roman", serif;
+        --font-body: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+        --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+        /* Radius */
+        --r-sm: 6px;
+        --r-md: 8px;
+        --r-lg: 12px;
+        --r-xl: 16px;
+        --r-pill: 9999px;
       }
 
       * { box-sizing: border-box; }
       html { scroll-behavior: smooth; }
       body {
         margin: 0;
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-        color: var(--ink);
-        background:
-          radial-gradient(circle at 15% 12%, rgba(255, 202, 155, 0.42), transparent 300px),
-          radial-gradient(circle at 84% 18%, rgba(204, 120, 92, 0.18), transparent 280px),
-          linear-gradient(180deg, #fffdf8 0, var(--bg) 560px),
-          var(--bg);
+        font-family: var(--font-body);
+        font-size: 16px;
+        line-height: 1.55;
+        color: var(--body);
+        background: var(--canvas);
       }
 
       a { color: inherit; }
-      .page { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
+      .page { width: min(1200px, calc(100% - 48px)); margin: 0 auto; }
+
+      h1, h2, h3 {
+        font-family: var(--font-display);
+        font-weight: 500;
+        color: var(--ink);
+      }
+
+      /* Brand spike mark */
+      .spike {
+        display: inline-block;
+        width: 18px;
+        height: 18px;
+        flex: 0 0 auto;
+        color: var(--ink);
+      }
+      .spike svg { display: block; width: 100%; height: 100%; }
+
+      /* Top nav */
       .topbar {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 20px;
-        padding: 24px 0;
+        height: 64px;
       }
       .brand {
         display: inline-flex;
         align-items: center;
-        gap: 10px;
-        font-weight: 800;
-        letter-spacing: -0.01em;
+        gap: 9px;
+        font-family: var(--font-body);
+        font-weight: 600;
+        font-size: 16px;
+        color: var(--ink);
         text-decoration: none;
-      }
-      .mark {
-        display: grid;
-        place-items: center;
-        width: 34px;
-        height: 34px;
-        border: 1px solid var(--line);
-        border-radius: 999px;
-        color: var(--accent-strong);
-        background: var(--surface);
-        box-shadow: 0 8px 22px rgba(120, 65, 45, 0.1);
       }
       .nav {
         display: flex;
         align-items: center;
-        gap: 16px;
-        color: var(--muted);
+        gap: 24px;
         font-size: 14px;
-        font-weight: 700;
+        font-weight: 500;
       }
-      .nav a { text-decoration: none; }
-      .nav a:hover { color: var(--accent-strong); }
+      .nav a { color: var(--muted); text-decoration: none; }
+      .nav a:hover { color: var(--ink); }
+      .nav .sign-in { color: var(--ink); }
 
-      .hero {
-        display: grid;
-        grid-template-columns: minmax(0, 1.02fr) minmax(360px, 0.98fr);
-        gap: 42px;
-        align-items: center;
-        padding: 54px 0 42px;
-      }
-      .eyebrow {
-        display: inline-flex;
-        margin: 0 0 18px;
-        padding: 8px 12px;
-        border: 1px solid rgba(157, 90, 73, 0.22);
-        border-radius: 999px;
-        color: var(--accent-strong);
-        background: rgba(255, 250, 241, 0.76);
-        font-size: 13px;
-        font-weight: 800;
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-      }
-      h1 {
-        margin: 0;
-        max-width: 780px;
-        font-family: Georgia, "Times New Roman", serif;
-        font-size: 68px;
-        line-height: 0.98;
-        font-weight: 400;
-        letter-spacing: -0.04em;
-        color: var(--accent-strong);
-      }
-      .lede {
-        max-width: 680px;
-        margin: 22px 0 0;
-        color: var(--muted);
-        font-size: 20px;
-        line-height: 1.65;
-      }
-      .hero-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        margin-top: 28px;
-      }
+      /* Buttons */
       .button,
       button {
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-height: 44px;
-        padding: 11px 16px;
-        border: 1px solid var(--accent-strong);
-        border-radius: 999px;
-        font: inherit;
-        font-weight: 800;
+        min-height: 40px;
+        padding: 12px 20px;
+        border: 1px solid transparent;
+        border-radius: var(--r-md);
+        font-family: var(--font-body);
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 1;
         text-decoration: none;
         cursor: pointer;
-        transition: background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
       }
       .button.primary,
       button.primary {
-        color: #fffaf1;
-        background: var(--accent-strong);
-        box-shadow: 0 12px 26px rgba(157, 90, 73, 0.22);
+        color: var(--on-primary);
+        background: var(--primary);
+        border-color: var(--primary);
       }
-      .button.primary:hover,
-      button.primary:hover {
-        background: #7f4739;
-        transform: translateY(-1px);
+      .button.primary:active,
+      button.primary:active {
+        background: var(--primary-active);
+        border-color: var(--primary-active);
       }
       .button.secondary {
-        color: var(--accent-strong);
-        background: rgba(255, 250, 241, 0.72);
+        color: var(--ink);
+        background: var(--canvas);
+        border-color: var(--hairline);
       }
-      .button.secondary:hover {
-        background: #ffffff;
-        box-shadow: 0 10px 24px rgba(120, 65, 45, 0.12);
+      .button.on-coral {
+        color: var(--ink);
+        background: var(--canvas);
+        border-color: var(--canvas);
+      }
+      .button.on-dark {
+        color: var(--on-dark);
+        background: var(--surface-dark-elevated);
+        border-color: var(--surface-dark-elevated);
+      }
+
+      /* Badges */
+      .badge-pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 12px;
+        border-radius: var(--r-pill);
+        background: var(--surface-card);
+        color: var(--ink);
+        font-size: 13px;
+        font-weight: 500;
+      }
+      .badge-coral {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 12px;
+        border-radius: var(--r-pill);
+        background: var(--primary);
+        color: var(--on-primary);
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+      }
+
+      /* Hero */
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 48px;
+        align-items: center;
+        padding: 96px 0;
+      }
+      .hero h1 {
+        margin: 20px 0 0;
+        font-size: 64px;
+        line-height: 1.05;
+        letter-spacing: -1.5px;
+      }
+      .lede {
+        max-width: 540px;
+        margin: 24px 0 0;
+        color: var(--body);
+        font-size: 18px;
+        line-height: 1.55;
+      }
+      .hero-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 32px;
       }
       .note {
-        margin: 18px 0 0;
+        margin: 24px 0 0;
         color: var(--muted);
         font-size: 14px;
         line-height: 1.55;
       }
 
-      .terminal-card,
-      .panel,
-      .flow-card {
-        border: 1px solid var(--line);
-        border-radius: 24px;
-        background: rgba(255, 250, 241, 0.86);
-      }
-      .terminal-card {
+      /* Code window card (dark) */
+      .code-window {
         overflow: hidden;
-        box-shadow: var(--shadow);
+        border-radius: var(--r-xl);
+        background: var(--surface-dark);
+        color: var(--on-dark);
       }
-      .terminal-top {
+      .code-window.lg { border-radius: var(--r-lg); }
+      .code-top {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        padding: 13px 14px;
-        border-bottom: 1px solid var(--line);
-        background: rgba(245, 239, 228, 0.82);
+        padding: 14px 18px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       }
-      .window-dots { display: inline-flex; gap: 6px; }
-      .dot { width: 9px; height: 9px; border-radius: 999px; background: rgba(157, 90, 73, 0.34); }
-      .terminal-label { color: var(--muted); font-size: 13px; font-weight: 800; }
-      .terminal-body { padding: 18px; }
-      .ticket {
-        display: grid;
-        gap: 14px;
-        padding: 18px;
-        border: 1px solid rgba(157, 90, 73, 0.18);
-        border-radius: 18px;
-        background:
-          radial-gradient(circle at 90% 12%, rgba(204, 120, 92, 0.14), transparent 150px),
-          linear-gradient(180deg, #fffdf8, var(--surface-soft));
+      .window-dots { display: inline-flex; gap: 7px; }
+      .dot { width: 11px; height: 11px; border-radius: var(--r-pill); background: #3a3833; }
+      .code-label {
+        color: var(--on-dark-soft);
+        font-family: var(--font-mono);
+        font-size: 13px;
       }
+      .code-body { padding: 24px; }
+      .ticket { display: grid; gap: 14px; }
       .ticket-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 14px;
-        padding-bottom: 12px;
-        border-bottom: 1px solid var(--line);
+        padding-bottom: 14px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
       }
       .ticket-row:last-child { padding-bottom: 0; border-bottom: 0; }
-      .ticket-label { color: var(--muted); font-size: 13px; font-weight: 800; }
-      code,
-      .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-      code {
-        padding: 2px 5px;
-        border-radius: 5px;
-        background: var(--code);
-        font-size: 0.92em;
-        color: var(--accent-strong);
+      .ticket-key { color: var(--on-dark-soft); font-size: 13px; font-weight: 500; }
+      .mono { font-family: var(--font-mono); }
+      .ticket .val {
+        font-family: var(--font-mono);
+        font-size: 13px;
+        color: #e8a55a;
       }
       .status-pill {
         display: inline-flex;
-        padding: 6px 9px;
-        border-radius: 999px;
-        color: var(--success);
-        background: var(--success-soft);
+        align-items: center;
+        gap: 7px;
+        font-family: var(--font-mono);
         font-size: 13px;
-        font-weight: 800;
+        color: var(--accent-teal);
+      }
+      .status-pill::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-radius: var(--r-pill);
+        background: var(--success);
       }
 
-      .section { padding: 42px 0; }
-      .section-heading { max-width: 760px; margin-bottom: 22px; }
+      /* Sections */
+      .section { padding: 96px 0; }
+      .section-heading { max-width: 760px; margin-bottom: 48px; }
+      .eyebrow {
+        display: inline-flex;
+        margin: 0 0 16px;
+      }
       .section-heading h2 {
         margin: 0;
-        font-family: Georgia, "Times New Roman", serif;
-        font-size: 34px;
+        font-size: 48px;
         line-height: 1.1;
-        font-weight: 400;
-        letter-spacing: -0.03em;
-        color: var(--accent-strong);
+        letter-spacing: -1px;
       }
       .section-heading p {
-        margin: 12px 0 0;
-        color: var(--muted);
-        font-size: 17px;
-        line-height: 1.65;
+        margin: 16px 0 0;
+        color: var(--body);
+        font-size: 18px;
+        line-height: 1.55;
       }
+
+      /* Cream feature band */
+      .band-cream { background: var(--surface-card); }
       .flow {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 16px;
+        gap: 24px;
       }
-      .flow-card {
-        padding: 22px;
-        box-shadow: 0 12px 36px rgba(120, 65, 45, 0.08);
+      .feature-card {
+        padding: 32px;
+        border-radius: var(--r-lg);
+        background: var(--canvas);
       }
       .step-number {
         display: grid;
         place-items: center;
-        width: 34px;
-        height: 34px;
-        border-radius: 999px;
-        color: #fffaf1;
-        background: var(--accent);
-        font-weight: 900;
+        width: 36px;
+        height: 36px;
+        border-radius: var(--r-pill);
+        color: var(--on-primary);
+        background: var(--primary);
+        font-family: var(--font-body);
+        font-weight: 600;
+        font-size: 15px;
       }
-      .flow-card h3 { margin: 16px 0 8px; font-size: 19px; }
-      .flow-card p { margin: 0; color: var(--muted); line-height: 1.58; }
+      .feature-card h3 { margin: 20px 0 8px; font-size: 24px; letter-spacing: -0.5px; }
+      .feature-card p { margin: 0; color: var(--body); line-height: 1.55; }
 
-      .prompt-panel { overflow: hidden; }
-      .prompt-header {
+      /* Dark instructions band */
+      .band-dark { background: var(--surface-dark); }
+      .band-dark .section-heading h2,
+      .band-dark .eyebrow-light { color: var(--on-dark); }
+      .band-dark .section-heading p { color: var(--on-dark-soft); }
+      .eyebrow-light {
+        display: inline-flex;
+        margin: 0 0 16px;
+        padding: 4px 12px;
+        border-radius: var(--r-pill);
+        background: var(--surface-dark-elevated);
+        color: var(--on-dark);
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+      }
+      .prompt-toolbar {
         display: flex;
         flex-wrap: wrap;
         align-items: center;
         justify-content: space-between;
         gap: 12px;
-        padding: 18px;
-        border-bottom: 1px solid var(--line);
-        background: rgba(245, 239, 228, 0.82);
-      }
-      .prompt-header h2 {
-        margin: 0;
-        font-family: Georgia, "Times New Roman", serif;
-        font-size: 28px;
-        font-weight: 400;
-        color: var(--accent-strong);
+        margin-bottom: 16px;
       }
       .copy-state {
-        min-height: 20px;
-        margin: 12px 18px 0;
-        color: var(--success);
+        min-height: 18px;
+        color: var(--accent-teal);
         font-size: 14px;
-        font-weight: 800;
+        font-weight: 500;
       }
       .prompt-copy {
         overflow: auto;
         max-height: 620px;
-        margin: 12px 18px 18px;
-        padding: 18px;
-        border: 1px solid var(--line);
-        border-radius: 18px;
-        color: var(--ink);
-        background: #fffdf8;
-        line-height: 1.5;
-        white-space: pre-wrap;
+        margin: 0;
+        padding: 24px;
+        border-radius: var(--r-lg);
+        background: var(--surface-dark-soft);
+        color: var(--on-dark);
+        font-family: var(--font-mono);
+        font-size: 14px;
+        line-height: 1.6;
+        white-space: pre;
       }
+
+      /* Comparison cards (cream) */
       .info-grid {
         display: grid;
         grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
-        gap: 16px;
+        gap: 24px;
       }
-      .info-card {
-        padding: 22px;
-        box-shadow: 0 12px 36px rgba(120, 65, 45, 0.08);
+      .compare-card {
+        padding: 32px;
+        border: 1px solid var(--hairline);
+        border-radius: var(--r-lg);
+        background: var(--canvas);
       }
-      .info-card h3 {
-        margin: 0 0 12px;
-        font-family: Georgia, "Times New Roman", serif;
-        font-size: 24px;
-        font-weight: 400;
-        color: var(--accent-strong);
-      }
-      .info-card ul { margin: 0; padding-left: 20px; color: var(--muted); line-height: 1.65; }
+      .compare-card h3 { margin: 0 0 16px; font-size: 28px; letter-spacing: -0.5px; }
+      .compare-card ul { margin: 0; padding-left: 20px; color: var(--body); line-height: 1.7; }
       .constant-list {
         display: grid;
-        gap: 10px;
+        gap: 0;
         margin: 0;
         padding: 0;
         list-style: none;
@@ -328,28 +392,83 @@
         align-items: center;
         justify-content: space-between;
         gap: 14px;
-        padding: 11px 0;
-        border-bottom: 1px solid var(--line);
+        padding: 14px 0;
+        border-bottom: 1px solid var(--hairline);
       }
       .constant-list li:last-child { border-bottom: 0; }
-      .constant-list span { color: var(--muted); font-size: 13px; font-weight: 800; }
-      footer { padding: 28px 0 44px; color: var(--muted); font-size: 14px; }
+      .constant-list span { color: var(--muted); font-size: 14px; font-weight: 500; }
+      code {
+        padding: 2px 6px;
+        border-radius: var(--r-sm);
+        background: var(--surface-card);
+        font-family: var(--font-mono);
+        font-size: 0.9em;
+        color: var(--body-strong);
+      }
 
-      @media (max-width: 900px) {
+      /* Coral CTA band */
+      .cta-coral {
+        padding: 64px;
+        border-radius: var(--r-lg);
+        background: var(--primary);
+        color: var(--on-primary);
+        text-align: center;
+      }
+      .cta-coral h2 {
+        margin: 0;
+        max-width: 720px;
+        margin-inline: auto;
+        font-size: 36px;
+        line-height: 1.15;
+        letter-spacing: -0.5px;
+        color: var(--on-primary);
+      }
+      .cta-coral p { margin: 16px auto 0; max-width: 560px; color: rgba(255, 255, 255, 0.85); font-size: 18px; }
+      .cta-coral .hero-actions { justify-content: center; margin-top: 32px; }
+
+      /* Footer (dark) */
+      .site-footer {
+        background: var(--surface-dark);
+        color: var(--on-dark-soft);
+        padding: 64px 0;
+      }
+      .footer-grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1.4fr) repeat(3, minmax(0, 1fr));
+        gap: 32px;
+      }
+      .footer-brand { display: inline-flex; align-items: center; gap: 9px; color: var(--on-dark); font-weight: 600; }
+      .footer-brand .spike { color: var(--on-dark); }
+      .footer-col h4 { margin: 0 0 14px; font-family: var(--font-body); font-size: 13px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--on-dark-soft); }
+      .footer-col a { display: block; margin-bottom: 10px; color: var(--on-dark); font-size: 14px; text-decoration: none; opacity: 0.82; }
+      .footer-col a:hover { opacity: 1; }
+      .footer-note { margin-top: 8px; max-width: 320px; color: var(--on-dark-soft); font-size: 14px; line-height: 1.6; }
+      .footer-legal { margin-top: 48px; padding-top: 24px; border-top: 1px solid rgba(255, 255, 255, 0.08); color: var(--muted-soft); font-size: 13px; }
+
+      /* Responsive */
+      @media (max-width: 1024px) {
+        .hero h1 { font-size: 52px; }
+        .footer-grid { grid-template-columns: 1fr 1fr; }
+      }
+      @media (max-width: 768px) {
+        .page { width: min(100% - 32px, 1200px); }
         .hero,
         .flow,
         .info-grid { grid-template-columns: 1fr; }
-        h1 { font-size: 48px; }
-        .hero { padding-top: 30px; }
+        .hero { padding: 56px 0; gap: 32px; }
+        .hero h1 { font-size: 40px; letter-spacing: -1px; }
+        .section { padding: 64px 0; }
+        .section-heading { margin-bottom: 32px; }
+        .section-heading h2 { font-size: 34px; letter-spacing: -0.5px; }
+        .cta-coral { padding: 40px 24px; }
+        .cta-coral h2 { font-size: 28px; }
+        .footer-grid { grid-template-columns: 1fr; }
+        .nav { gap: 16px; flex-wrap: wrap; }
       }
       @media (max-width: 620px) {
-        .page { width: min(100% - 28px, 1180px); }
-        .topbar { align-items: flex-start; flex-direction: column; }
-        .nav { flex-wrap: wrap; }
-        h1 { font-size: 40px; }
-        .lede { font-size: 18px; }
+        .topbar { height: auto; flex-direction: column; align-items: flex-start; gap: 14px; padding: 20px 0; }
         .ticket-row,
-        .constant-list li { align-items: flex-start; flex-direction: column; }
+        .constant-list li { flex-direction: column; align-items: flex-start; }
       }
     </style>
   </head>
@@ -357,24 +476,26 @@
     <div class="page">
       <header class="topbar">
         <a class="brand" href="https://github.com/imjszhang/creamlon-postcard">
-          <span class="mark">CP</span>
+          <span class="spike" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5l1.9 7.3 5.4-5.2-3.2 6.9 7.4-1.4-6.6 3.9 6.6 3.9-7.4-1.4 3.2 6.9-5.4-5.2L12 22.5l-1.9-7.3-5.4 5.2 3.2-6.9-7.4 1.4 6.6-3.9-6.6-3.9 7.4 1.4-3.2-6.9 5.4 5.2z"/></svg>
+          </span>
           <span>Creamlon Postcard</span>
         </a>
         <nav class="nav" aria-label="Page navigation">
           <a href="#instructions">Agent instructions</a>
           <a href="#security">Security model</a>
-          <a href="https://github.com/imjszhang/creamlon-postcard">GitHub</a>
+          <a class="sign-in" href="https://github.com/imjszhang/creamlon-postcard">GitHub</a>
         </nav>
       </header>
 
       <main>
         <section class="hero">
           <div>
-            <p class="eyebrow">Agent-native checkout</p>
+            <span class="badge-coral">Agent-native checkout</span>
             <h1>Buy a postcard ticket through your GitHub agent.</h1>
             <p class="lede">
               Creamlon Postcard demonstrates the paid credential pattern for
-              agent work: a buyer-owned private inbox receives the ticket, an
+              agent work: a buyer-owned private inbox receives the ticket, a
               private prompt becomes a <code>postcard</code> task by digest, and
               a signed public proof verifies the delivery manifest.
             </p>
@@ -388,81 +509,87 @@
             </p>
           </div>
 
-          <aside class="terminal-card" aria-label="Creamlon Postcard protocol preview">
-            <div class="terminal-top">
+          <aside class="code-window" aria-label="Creamlon Postcard protocol preview">
+            <div class="code-top">
               <span class="window-dots" aria-hidden="true">
                 <span class="dot"></span>
                 <span class="dot"></span>
                 <span class="dot"></span>
               </span>
-              <span class="terminal-label">postcard-ticket.json</span>
+              <span class="code-label">postcard-ticket.json</span>
             </div>
-            <div class="terminal-body">
+            <div class="code-body">
               <div class="ticket">
                 <div class="ticket-row">
-                  <span class="ticket-label">Provider</span>
-                  <code>github-pages-demo-vendor</code>
+                  <span class="ticket-key">Provider</span>
+                  <span class="val">github-pages-demo-vendor</span>
                 </div>
                 <div class="ticket-row">
-                  <span class="ticket-label">Capability</span>
-                  <code>postcard</code>
+                  <span class="ticket-key">Capability</span>
+                  <span class="val">postcard</span>
                 </div>
                 <div class="ticket-row">
-                  <span class="ticket-label">Delivery</span>
-                  <code>&lt;buyer&gt;/creamlon-inbox-postcard</code>
+                  <span class="ticket-key">Delivery</span>
+                  <span class="val">&lt;buyer&gt;/creamlon-inbox-postcard</span>
                 </div>
                 <div class="ticket-row">
-                  <span class="ticket-label">Proof</span>
+                  <span class="ticket-key">Proof</span>
                   <span class="status-pill">signature_ok · binding_ok</span>
                 </div>
               </div>
             </div>
           </aside>
         </section>
+      </main>
+    </div>
 
-        <section class="section" aria-labelledby="flow-title">
-          <div class="section-heading">
-            <h2 id="flow-title">A checkout flow made for agents</h2>
-            <p>
-              The page is only the handoff. The real authority comes from GitHub
-              actions your agent performs: creating the inbox, opening the
-              purchase Issue, writing the private prompt, and later reading the
-              delivered postcard image.
-            </p>
-          </div>
-          <div class="flow">
-            <article class="flow-card">
-              <div class="step-number">1</div>
-              <h3>Private inbox</h3>
-              <p>Your agent creates a dedicated private repository and grants the seller write access for credential delivery.</p>
-            </article>
-            <article class="flow-card">
-              <div class="step-number">2</div>
-              <h3>Demo paid receipt</h3>
-              <p>The agent writes a simulated paid receipt and opens a public purchase-redeem Issue in the seller repository.</p>
-            </article>
-            <article class="flow-card">
-              <div class="step-number">3</div>
-              <h3>Credential proof</h3>
-              <p>The seller writes the ticket to your inbox; the task consumes it, renders a private postcard image, and publishes a verifiable Creamlon proof.</p>
-            </article>
-          </div>
-        </section>
+    <section class="section band-cream" aria-labelledby="flow-title">
+      <div class="page">
+        <div class="section-heading">
+          <span class="badge-pill">Checkout flow</span>
+          <h2 id="flow-title">A checkout flow made for agents</h2>
+          <p>
+            The page is only the handoff. The real authority comes from GitHub
+            actions your agent performs: creating the inbox, opening the
+            purchase Issue, writing the private prompt, and later reading the
+            delivered postcard image.
+          </p>
+        </div>
+        <div class="flow">
+          <article class="feature-card">
+            <div class="step-number">1</div>
+            <h3>Private inbox</h3>
+            <p>Your agent creates a dedicated private repository and grants the seller write access for credential delivery.</p>
+          </article>
+          <article class="feature-card">
+            <div class="step-number">2</div>
+            <h3>Demo paid receipt</h3>
+            <p>The agent writes a simulated paid receipt and opens a public purchase-redeem Issue in the seller repository.</p>
+          </article>
+          <article class="feature-card">
+            <div class="step-number">3</div>
+            <h3>Credential proof</h3>
+            <p>The seller writes the ticket to your inbox; the task consumes it, renders a private postcard image, and publishes a verifiable Creamlon proof.</p>
+          </article>
+        </div>
+      </div>
+    </section>
 
-        <section class="section" id="instructions">
-          <div class="panel prompt-panel">
-            <div class="prompt-header">
-              <div>
-                <h2>Agent Instructions</h2>
-                <p class="note">
-                  Paste this into a GitHub-capable agent. It should confirm your
-                  login from authenticated GitHub context before doing anything.
-                </p>
-              </div>
-              <button class="primary copy-action" type="button">Copy Instructions</button>
-            </div>
-            <div class="copy-state" id="copyState" aria-live="polite"></div>
-            <pre class="prompt-copy mono" id="agentPrompt">You are my GitHub-capable agent. Run the Creamlon Postcard agent checkout.
+    <section class="section band-dark" id="instructions">
+      <div class="page">
+        <div class="section-heading">
+          <span class="eyebrow-light">Agent handoff</span>
+          <h2>Agent Instructions</h2>
+          <p>
+            Paste this into a GitHub-capable agent. It should confirm your
+            login from authenticated GitHub context before doing anything.
+          </p>
+        </div>
+        <div class="prompt-toolbar">
+          <span class="copy-state" id="copyState" aria-live="polite"></span>
+          <button class="primary copy-action" type="button">Copy Instructions</button>
+        </div>
+        <pre class="prompt-copy" id="agentPrompt">You are my GitHub-capable agent. Run the Creamlon Postcard agent checkout.
 
 Use my authenticated GitHub account. First confirm my GitHub login through the GitHub API or your GitHub integration. Do not rely on a manually typed login unless GitHub auth is unavailable.
 
@@ -527,11 +654,17 @@ extensions:
     input_path: .creamlon-inbox/requests/&lt;request_id&gt;/input.txt
 14. Wait for delivery, then read .creamlon-inbox/deliveries/issue-&lt;number&gt;/postcard.png and delivery.json from the private inbox.
 15. Verify the final proof with Creamlon and report signature_ok, binding_ok, issue number, credential_id, delivery.json path, and postcard.png path.</pre>
-          </div>
-        </section>
+      </div>
+    </section>
 
-        <section class="section info-grid" id="security">
-          <div class="panel info-card">
+    <section class="section" id="security">
+      <div class="page">
+        <div class="section-heading">
+          <span class="badge-pill">Trust model</span>
+          <h2>Private by construction, public by proof</h2>
+        </div>
+        <div class="info-grid">
+          <div class="compare-card">
             <h3>Security model</h3>
             <ul>
               <li>GitHub Pages never sees credentials or GitHub tokens.</li>
@@ -541,7 +674,7 @@ extensions:
             </ul>
           </div>
 
-          <div class="panel info-card">
+          <div class="compare-card">
             <h3>Protocol constants</h3>
             <ul class="constant-list">
               <li><span>Seller repo</span><code>imjszhang/creamlon-postcard</code></li>
@@ -551,14 +684,58 @@ extensions:
               <li><span>Demo price</span><code>0 POSTCARD</code></li>
             </ul>
           </div>
-        </section>
-      </main>
+        </div>
+      </div>
+    </section>
 
-      <footer>
-        Creamlon Postcard is a static demo checkout for private-inbox delivery
-        and signed proof verification.
-      </footer>
-    </div>
+    <section class="section">
+      <div class="page">
+        <div class="cta-coral">
+          <h2>Hand off the checkout and verify a signed delivery.</h2>
+          <p>Copy the agent instructions, let your GitHub agent run the flow, and confirm the public proof.</p>
+          <div class="hero-actions">
+            <a class="button on-coral" href="#instructions">Copy the agent handoff</a>
+            <a class="button on-coral" style="background:transparent;color:#fff;border-color:rgba(255,255,255,0.55);" href="https://github.com/imjszhang/creamlon-postcard">View repository</a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="site-footer">
+      <div class="page">
+        <div class="footer-grid">
+          <div>
+            <span class="footer-brand">
+              <span class="spike" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1.5l1.9 7.3 5.4-5.2-3.2 6.9 7.4-1.4-6.6 3.9 6.6 3.9-7.4-1.4 3.2 6.9-5.4-5.2L12 22.5l-1.9-7.3-5.4 5.2 3.2-6.9-7.4 1.4 6.6-3.9-6.6-3.9 7.4 1.4-3.2-6.9 5.4 5.2z"/></svg>
+              </span>
+              Creamlon Postcard
+            </span>
+            <p class="footer-note">A static demo checkout for private-inbox delivery and signed proof verification.</p>
+          </div>
+          <div class="footer-col">
+            <h4>Product</h4>
+            <a href="#instructions">Agent instructions</a>
+            <a href="#security">Security model</a>
+            <a href="https://github.com/imjszhang/creamlon-postcard">Repository</a>
+          </div>
+          <div class="footer-col">
+            <h4>Protocol</h4>
+            <a href="https://github.com/imjszhang/creamlon-postcard/blob/main/.creamlon/manifest.yaml">Manifest</a>
+            <a href="https://github.com/imjszhang/creamlon-postcard/blob/main/.creamlon/trust/proofs.log">Proof log</a>
+            <a href="https://github.com/imjszhang/creamlon-postcard/blob/main/SKILL.md">Buyer playbook</a>
+          </div>
+          <div class="footer-col">
+            <h4>Resources</h4>
+            <a href="https://github.com/imjszhang/creamlon-postcard/blob/main/README.md">Documentation</a>
+            <a href="https://github.com/imjszhang/creamlon-postcard/issues">Issues</a>
+          </div>
+        </div>
+        <div class="footer-legal">
+          Creamlon Postcard · static demo · private-inbox delivery and signed proof verification.
+        </div>
+      </div>
+    </footer>
 
     <script>
       const copyButton = document.querySelector(".copy-action");
