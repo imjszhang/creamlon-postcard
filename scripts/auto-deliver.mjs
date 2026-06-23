@@ -1,5 +1,11 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -7,6 +13,9 @@ import { renderPostcard, hashText } from './lib/postcard-renderer.mjs';
 
 const DEFAULT_REPO = 'imjszhang/creamlon-postcard';
 const DEFAULT_CAPABILITY_ID = 'postcard';
+const DEFAULT_GITHUB_TIMEOUT_MS = 30_000;
+const DEFAULT_TASK_TIMEOUT_MS = 120_000;
+const DEFAULT_TASK_DELAY_MS = 1_000;
 
 function usage() {
   return `Usage: node scripts/auto-deliver.mjs [options]
@@ -19,6 +28,10 @@ Options:
   --repo <owner/repo>       Override target GitHub repository.
   --repo-path <dir>         Override local node repository path.
   --creamlon-path <dir>     Override local js-creamlon checkout.
+  --github-timeout-ms <n>   GitHub API timeout in milliseconds (default: 30000).
+  --task-timeout-ms <n>     Per task render/CLI timeout in milliseconds (default: 120000).
+  --task-delay-ms <n>       Delay between delivered tasks in milliseconds (default: 1000).
+  --keep-artifacts          Keep local .data/auto-deliver artifacts after delivery.
   --help                    Show this help.
 `;
 }
@@ -32,6 +45,10 @@ function parseArgs(argv) {
     repo: null,
     repoPath: null,
     creamlonPath: null,
+    githubTimeoutMs: null,
+    taskTimeoutMs: null,
+    taskDelayMs: null,
+    keepArtifacts: false,
     help: false,
   };
 
@@ -53,6 +70,14 @@ function parseArgs(argv) {
       opts.repoPath = argv[++i];
     } else if (arg === '--creamlon-path') {
       opts.creamlonPath = argv[++i];
+    } else if (arg === '--github-timeout-ms') {
+      opts.githubTimeoutMs = Number.parseInt(argv[++i], 10);
+    } else if (arg === '--task-timeout-ms') {
+      opts.taskTimeoutMs = Number.parseInt(argv[++i], 10);
+    } else if (arg === '--task-delay-ms') {
+      opts.taskDelayMs = Number.parseInt(argv[++i], 10);
+    } else if (arg === '--keep-artifacts') {
+      opts.keepArtifacts = true;
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
@@ -61,6 +86,15 @@ function parseArgs(argv) {
   if (!opts.capabilityId) throw new Error('--capability-id is required.');
   if (!Number.isInteger(opts.limit) || opts.limit < 1) {
     throw new Error('--limit must be a positive integer.');
+  }
+  for (const [name, value, min] of [
+    ['--github-timeout-ms', opts.githubTimeoutMs, 1],
+    ['--task-timeout-ms', opts.taskTimeoutMs, 1],
+    ['--task-delay-ms', opts.taskDelayMs, 0],
+  ]) {
+    if (value !== null && (!Number.isInteger(value) || value < min)) {
+      throw new Error(`${name} must be an integer >= ${min}.`);
+    }
   }
   return opts;
 }
@@ -81,8 +115,35 @@ function loadEnvFile(repoPath) {
   return env;
 }
 
+function numberSetting(name, cliValue, envFile, fallback, min = 1) {
+  const raw = cliValue ?? envFile[name] ?? process.env[name] ?? fallback;
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isInteger(value) || value < min) {
+    throw new Error(`${name} must be an integer >= ${min}.`);
+  }
+  return value;
+}
+
+function boolSetting(name, cliValue, envFile, fallback = false) {
+  if (cliValue) return true;
+  const raw = envFile[name] ?? process.env[name];
+  if (raw === undefined) return fallback;
+  return /^(1|true|yes|on)$/i.test(String(raw).trim());
+}
+
+function tokenSetting(envFile, names) {
+  for (const name of names) {
+    const value = envFile[name] || process.env[name];
+    if (value && value.trim()) return value.trim();
+  }
+  return null;
+}
+
 function parseJsonOutput(result, label) {
   const output = `${result.stdout || ''}${result.stderr || ''}`.trim();
+  if (result.error) {
+    throw new Error(`${label} failed: ${result.error.message}\n${output}`);
+  }
   if (result.status !== 0) {
     throw new Error(`${label} failed.\n${output}`);
   }
@@ -120,16 +181,29 @@ async function loadTaskParser(creamlonPath) {
   return mod.parseTask;
 }
 
-async function fetchIssueBody(repoSlug, issueNumber, token) {
+async function fetchIssueBody(repoSlug, issueNumber, token, timeoutMs) {
   const { owner, repo } = parseRepoSlug(repoSlug);
-  const response = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token}`,
-      'User-Agent': 'creamlon-postcard-auto-deliver',
-      'X-GitHub-Api-Version': '2022-11-28',
-    },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(`https://api.github.com/repos/${owner}/${repo}/issues/${issueNumber}`, {
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`,
+        'User-Agent': 'creamlon-postcard-auto-deliver',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`Timed out reading Issue #${issueNumber} after ${timeoutMs}ms.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   const text = await response.text();
   if (!response.ok) {
     throw new Error(`Failed to read Issue #${issueNumber}: HTTP ${response.status}\n${text}`);
@@ -138,12 +212,13 @@ async function fetchIssueBody(repoSlug, issueNumber, token) {
   return issue.body || '';
 }
 
-function runCreamlon(args, creamlonPath, env) {
+function runCreamlon(args, creamlonPath, env, timeoutMs) {
   return spawnSync(process.execPath, [path.join(creamlonPath, 'bin', 'creamlon.mjs'), ...args], {
     cwd: creamlonPath,
     env: { ...process.env, ...env },
     encoding: 'utf8',
     stdio: 'pipe',
+    timeout: timeoutMs,
   });
 }
 
@@ -155,17 +230,30 @@ function runGit(args, cwd) {
   });
 }
 
-async function githubJson(url, token, init = {}) {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token}`,
-      'User-Agent': 'creamlon-postcard-auto-deliver',
-      'X-GitHub-Api-Version': '2022-11-28',
-      ...(init.headers || {}),
-    },
-  });
+async function githubJson(url, token, init = {}, timeoutMs = DEFAULT_GITHUB_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${token}`,
+        'User-Agent': 'creamlon-postcard-auto-deliver',
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(init.headers || {}),
+      },
+    });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error(`GitHub API timed out after ${timeoutMs}ms: ${url}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
   const text = await response.text();
   if (!response.ok) {
     throw new Error(`GitHub API failed: ${response.status} ${url}\n${text}`);
@@ -173,12 +261,12 @@ async function githubJson(url, token, init = {}) {
   return text ? JSON.parse(text) : null;
 }
 
-async function writeGitHubFile(repoSlug, filePath, content, message, token) {
+async function writeGitHubFile(repoSlug, filePath, content, message, token, timeoutMs) {
   const { owner, repo } = parseRepoSlug(repoSlug);
   const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
   let sha = null;
   try {
-    const existing = await githubJson(`https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`, token);
+    const existing = await githubJson(`https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`, token, {}, timeoutMs);
     sha = existing.sha || null;
   } catch (error) {
     if (!error.message.includes('GitHub API failed: 404')) throw error;
@@ -193,13 +281,13 @@ async function writeGitHubFile(repoSlug, filePath, content, message, token) {
         : Buffer.from(content, 'utf8').toString('base64'),
       ...(sha ? { sha } : {}),
     }),
-  });
+  }, timeoutMs);
 }
 
-async function readGitHubFile(repoSlug, filePath, token) {
+async function readGitHubFile(repoSlug, filePath, token, timeoutMs) {
   const { owner, repo } = parseRepoSlug(repoSlug);
   const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
-  const file = await githubJson(`https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`, token);
+  const file = await githubJson(`https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`, token, {}, timeoutMs);
   if (file.type !== 'file' || typeof file.content !== 'string') {
     throw new Error(`${repoSlug}:${filePath} is not a file.`);
   }
@@ -287,10 +375,10 @@ function resolvePrivateInput(nodePath, parsedTask) {
   return { credentialId, issuance, inboxRepo, inputPath };
 }
 
-async function fetchPrivateInput(nodePath, parsedTask, token) {
+async function fetchPrivateInput(nodePath, parsedTask, token, timeoutMs) {
   if (!parsedTask.input?.digest) throw new Error('Private postcard tasks require input.digest.');
   const privateInput = resolvePrivateInput(nodePath, parsedTask);
-  const inputText = await readGitHubFile(privateInput.inboxRepo, privateInput.inputPath, token);
+  const inputText = await readGitHubFile(privateInput.inboxRepo, privateInput.inputPath, token, timeoutMs);
   const inputDigest = hashText(inputText);
   if (inputDigest !== parsedTask.input.digest) {
     throw new Error(`Private input digest mismatch: expected ${parsedTask.input.digest}, got ${inputDigest}.`);
@@ -298,7 +386,7 @@ async function fetchPrivateInput(nodePath, parsedTask, token) {
   return { ...privateInput, inputText, inputDigest };
 }
 
-async function writePrivateInboxDeliveryFiles(nodePath, issueNumber, parsedTask, artifacts, token) {
+async function writePrivateInboxDeliveryFiles(nodePath, issueNumber, parsedTask, artifacts, token, timeoutMs) {
   const privateInput = resolvePrivateInput(nodePath, parsedTask);
   const basePath = `.creamlon-inbox/deliveries/issue-${issueNumber}`;
 
@@ -308,6 +396,7 @@ async function writePrivateInboxDeliveryFiles(nodePath, issueNumber, parsedTask,
     readFileSync(artifacts.pngPath),
     `deliver Creamlon postcard image #${issueNumber}`,
     token,
+    timeoutMs,
   );
   await writeGitHubFile(
     privateInput.inboxRepo,
@@ -315,6 +404,7 @@ async function writePrivateInboxDeliveryFiles(nodePath, issueNumber, parsedTask,
     readFileSync(artifacts.htmlPath, 'utf8'),
     `deliver Creamlon postcard HTML #${issueNumber}`,
     token,
+    timeoutMs,
   );
   await writeGitHubFile(
     privateInput.inboxRepo,
@@ -322,11 +412,12 @@ async function writePrivateInboxDeliveryFiles(nodePath, issueNumber, parsedTask,
     artifacts.deliveryJson,
     `deliver Creamlon postcard manifest #${issueNumber}`,
     token,
+    timeoutMs,
   );
   console.log(`[ok] Wrote private postcard artifacts to ${privateInput.inboxRepo}:${basePath}.`);
 }
 
-async function writePrivateInboxProofFiles(nodePath, publicRepo, issueNumber, parsedTask, proof, token) {
+async function writePrivateInboxProofFiles(nodePath, publicRepo, issueNumber, parsedTask, proof, token, timeoutMs) {
   const privateInput = resolvePrivateInput(nodePath, parsedTask);
   const basePath = `.creamlon-inbox/deliveries/issue-${issueNumber}`;
   const status = {
@@ -347,6 +438,7 @@ async function writePrivateInboxProofFiles(nodePath, publicRepo, issueNumber, pa
     `${JSON.stringify(proof, null, 2)}\n`,
     `deliver Creamlon postcard proof #${issueNumber}`,
     token,
+    timeoutMs,
   );
   await writeGitHubFile(
     privateInput.inboxRepo,
@@ -354,12 +446,55 @@ async function writePrivateInboxProofFiles(nodePath, publicRepo, issueNumber, pa
     `${JSON.stringify(status, null, 2)}\n`,
     `deliver Creamlon postcard status #${issueNumber}`,
     token,
+    timeoutMs,
   );
   console.log(`[ok] Wrote private proof metadata to ${privateInput.inboxRepo}:${basePath}.`);
 }
 
 function maskPathForLog(filePath) {
   return filePath.replace(/\\/g, '/');
+}
+
+function safeLockName(value) {
+  return String(value).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 140);
+}
+
+async function withLocalLock(nodePath, scope, key, callback) {
+  const lockDir = path.join(nodePath, '.data', 'locks', `${scope}-${safeLockName(key)}.lock`);
+  mkdirSync(path.dirname(lockDir), { recursive: true });
+  try {
+    mkdirSync(lockDir);
+  } catch (error) {
+    if (error.code === 'EEXIST') {
+      throw new Error(`Another operator process is already handling ${scope} ${key}. Remove ${maskPathForLog(lockDir)} only after confirming it is stale.`);
+    }
+    throw error;
+  }
+  writeFileSync(path.join(lockDir, 'owner.json'), `${JSON.stringify({
+    scope,
+    key,
+    pid: process.pid,
+    created_at: new Date().toISOString(),
+  }, null, 2)}\n`, 'utf8');
+  try {
+    return await callback();
+  } finally {
+    rmSync(lockDir, { recursive: true, force: true });
+  }
+}
+
+function cleanupArtifacts(artifacts, keepArtifacts) {
+  if (!artifacts?.outDir) return;
+  if (keepArtifacts) {
+    console.log(`[debug] Kept local artifacts at ${maskPathForLog(artifacts.outDir)}.`);
+    return;
+  }
+  rmSync(artifacts.outDir, { recursive: true, force: true });
+  console.log(`[ok] Removed local private artifacts from ${maskPathForLog(artifacts.outDir)}.`);
+}
+
+function delay(ms) {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
 }
 
 async function main() {
@@ -371,9 +506,19 @@ async function main() {
 
   const repoPath = path.resolve(opts.repoPath || process.cwd());
   const envFile = loadEnvFile(repoPath);
-  const token = envFile.GITHUB_TOKEN || envFile.GH_TOKEN || process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-  if (!token) {
-    throw new Error('Missing GITHUB_TOKEN or GH_TOKEN. Set it in .env or the current process.');
+  const runtime = {
+    githubTimeoutMs: numberSetting('POSTCARD_GITHUB_TIMEOUT_MS', opts.githubTimeoutMs, envFile, DEFAULT_GITHUB_TIMEOUT_MS),
+    taskTimeoutMs: numberSetting('POSTCARD_TASK_TIMEOUT_MS', opts.taskTimeoutMs, envFile, DEFAULT_TASK_TIMEOUT_MS),
+    taskDelayMs: numberSetting('POSTCARD_TASK_DELAY_MS', opts.taskDelayMs, envFile, DEFAULT_TASK_DELAY_MS, 0),
+    keepArtifacts: boolSetting('POSTCARD_KEEP_ARTIFACTS', opts.keepArtifacts, envFile),
+  };
+  const legacyToken = tokenSetting(envFile, ['GITHUB_TOKEN', 'GH_TOKEN']);
+  const publicToken = tokenSetting(envFile, ['CREAMLON_PUBLIC_GITHUB_TOKEN', 'POSTCARD_PUBLIC_GITHUB_TOKEN'])
+    || legacyToken;
+  const inboxToken = tokenSetting(envFile, ['CREAMLON_INBOX_GITHUB_TOKEN', 'POSTCARD_INBOX_GITHUB_TOKEN'])
+    || legacyToken;
+  if (!publicToken || !inboxToken) {
+    throw new Error('Missing GitHub token. Set GITHUB_TOKEN/GH_TOKEN, or split CREAMLON_PUBLIC_GITHUB_TOKEN and CREAMLON_INBOX_GITHUB_TOKEN.');
   }
 
   const nodeRepo = opts.repo || envFile.CREAMLON_NODE_REPO || DEFAULT_REPO;
@@ -392,7 +537,7 @@ async function main() {
   }
 
   const parseTask = await loadTaskParser(creamlonPath);
-  const cliEnv = { GITHUB_TOKEN: token, GH_TOKEN: token };
+  const cliEnv = { GITHUB_TOKEN: publicToken, GH_TOKEN: publicToken };
   const watch = runCreamlon([
     'watch',
     nodeRepo,
@@ -400,7 +545,7 @@ async function main() {
     repoPath,
     '--once',
     '--pretty',
-  ], creamlonPath, cliEnv);
+  ], creamlonPath, cliEnv, runtime.taskTimeoutMs);
   const watchJson = parseJsonOutput(watch, 'creamlon watch');
   const tasks = (watchJson.tasks || [])
     .filter((task) => task.valid && task.capability_id === opts.capabilityId)
@@ -413,7 +558,7 @@ async function main() {
 
   console.log(`[info] Found ${tasks.length} valid ${opts.capabilityId} task(s).`);
   for (const task of tasks) {
-    const body = await fetchIssueBody(nodeRepo, task.issue_number, token);
+    const body = await fetchIssueBody(nodeRepo, task.issue_number, publicToken, runtime.githubTimeoutMs);
     const parsed = parseTask(body);
     if (parsed.capability_id !== opts.capabilityId) {
       console.log(`[skip] #${task.issue_number} capability mismatch: ${parsed.capability_id}`);
@@ -428,59 +573,79 @@ async function main() {
       continue;
     }
 
-    let privateInput;
-    try {
-      privateInput = await fetchPrivateInput(repoPath, parsed, token);
-    } catch (error) {
-      console.log(`[skip] #${task.issue_number} private input is unavailable: ${error.message}`);
-      continue;
-    }
-
     if (opts.dryRun) {
+      let privateInput;
+      try {
+        privateInput = await fetchPrivateInput(repoPath, parsed, inboxToken, runtime.githubTimeoutMs);
+      } catch (error) {
+        console.log(`[skip] #${task.issue_number} private input is unavailable: ${error.message}`);
+        continue;
+      }
       console.log(`[dry-run] #${task.issue_number} would render ${privateInput.inputText.length} private characters from ${privateInput.inboxRepo}:${privateInput.inputPath}.`);
       continue;
     }
 
-    const basePath = `.creamlon-inbox/deliveries/issue-${task.issue_number}`;
-    const artifacts = await renderPostcard({
-      repoPath,
-      issueNumber: task.issue_number,
-      requestId: parsed.request_id,
-      inputText: privateInput.inputText,
-      inputDigest: privateInput.inputDigest,
-      credentialId: privateInput.credentialId,
-      capabilityId: parsed.capability_id,
-      deliveryBasePath: basePath,
-    });
-    console.log(`[deliver] #${task.issue_number} output=${maskPathForLog(artifacts.deliveryPath)}`);
-    await writePrivateInboxDeliveryFiles(repoPath, task.issue_number, parsed, artifacts, token);
-    const delivered = runCreamlon([
-      'deliver',
-      nodeRepo,
-      String(task.issue_number),
-      '--repo-path',
-      repoPath,
-      '--output-file',
-      artifacts.deliveryPath,
-      '--pretty',
-    ], creamlonPath, cliEnv);
-    const proof = parseJsonOutput(delivered, `creamlon deliver #${task.issue_number}`);
-    await writePrivateInboxProofFiles(repoPath, nodeRepo, task.issue_number, parsed, proof, token);
+    let deliveredTask = false;
+    await withLocalLock(repoPath, 'deliver', `${task.issue_number}-${parsed.request_id}`, async () => {
+      let artifacts = null;
+      try {
+        let privateInput;
+        try {
+          privateInput = await fetchPrivateInput(repoPath, parsed, inboxToken, runtime.githubTimeoutMs);
+        } catch (error) {
+          console.log(`[skip] #${task.issue_number} private input is unavailable: ${error.message}`);
+          return;
+        }
 
-    const status = runCreamlon([
-      'status',
-      '--repo-path',
-      repoPath,
-    ], creamlonPath, cliEnv);
-    if (status.status !== 0) {
-      throw new Error(`creamlon status failed.\n${status.stderr || status.stdout}`);
-    }
+        const basePath = `.creamlon-inbox/deliveries/issue-${task.issue_number}`;
+        artifacts = await renderPostcard({
+          repoPath,
+          issueNumber: task.issue_number,
+          requestId: parsed.request_id,
+          inputText: privateInput.inputText,
+          inputDigest: privateInput.inputDigest,
+          credentialId: privateInput.credentialId,
+          capabilityId: parsed.capability_id,
+          deliveryBasePath: basePath,
+          timeoutMs: runtime.taskTimeoutMs,
+        });
+        console.log(`[deliver] #${task.issue_number} output=${maskPathForLog(artifacts.deliveryPath)}`);
+        const delivered = runCreamlon([
+          'deliver',
+          nodeRepo,
+          String(task.issue_number),
+          '--repo-path',
+          repoPath,
+          '--output-file',
+          artifacts.deliveryPath,
+          '--pretty',
+        ], creamlonPath, cliEnv, runtime.taskTimeoutMs);
+        const proof = parseJsonOutput(delivered, `creamlon deliver #${task.issue_number}`);
+
+        await writePrivateInboxDeliveryFiles(repoPath, task.issue_number, parsed, artifacts, inboxToken, runtime.githubTimeoutMs);
+        await writePrivateInboxProofFiles(repoPath, nodeRepo, task.issue_number, parsed, proof, inboxToken, runtime.githubTimeoutMs);
+
+        const status = runCreamlon([
+          'status',
+          '--repo-path',
+          repoPath,
+        ], creamlonPath, cliEnv, runtime.taskTimeoutMs);
+        if (status.error || status.status !== 0) {
+          throw new Error(`creamlon status failed.\n${status.error?.message || status.stderr || status.stdout}`);
+        }
+        deliveredTask = true;
+      } finally {
+        cleanupArtifacts(artifacts, runtime.keepArtifacts);
+      }
+    });
+    if (!deliveredTask) continue;
 
     if (opts.push) {
       commitAndPushTrust(repoPath, task.issue_number);
     } else {
       console.log(`[todo] Commit and push ${publicTrustDir(repoPath)}, or rerun with --push.`);
     }
+    await delay(runtime.taskDelayMs);
   }
 }
 
