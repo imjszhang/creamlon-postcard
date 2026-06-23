@@ -16,22 +16,28 @@ const DEFAULT_CAPABILITY_ID = 'postcard';
 const DEFAULT_GITHUB_TIMEOUT_MS = 30_000;
 const DEFAULT_TASK_TIMEOUT_MS = 120_000;
 const DEFAULT_TASK_DELAY_MS = 1_000;
+const STOP_AFTER_STAGES = new Set(['preflight', 'render', 'deliver']);
 
 function usage() {
   return `Usage: node scripts/auto-deliver.mjs [options]
 
 Options:
-  --dry-run                 Parse pending tasks and prepare output plan only.
+  --dry-run                 Alias for --stop-after preflight.
   --push                    Commit and push public trust files after delivery.
   --capability-id <id>      Capability to auto-deliver (default: postcard).
-  --limit <n>               Max tasks to process in one run (default: 5).
+  --issue <n>               Process one explicit GitHub Issue number.
+  --limit <n>               Max tasks to process in one run (default: 1).
+  --batch                   Allow processing more than one task in one run.
+  --stop-after <stage>      Stop after preflight, render, or deliver for review.
+  --publish-reviewed        Publish local artifacts from a reviewed --stop-after deliver run.
+  --allow-overwrite-private Allow overwriting existing private inbox delivery files.
   --repo <owner/repo>       Override target GitHub repository.
   --repo-path <dir>         Override local node repository path.
   --creamlon-path <dir>     Override local js-creamlon checkout.
   --github-timeout-ms <n>   GitHub API timeout in milliseconds (default: 30000).
   --task-timeout-ms <n>     Per task render/CLI timeout in milliseconds (default: 120000).
   --task-delay-ms <n>       Delay between delivered tasks in milliseconds (default: 1000).
-  --keep-artifacts          Keep local .data/auto-deliver artifacts after delivery.
+  --keep-artifacts          Keep local .data/auto-deliver artifacts after delivery (default in review mode).
   --help                    Show this help.
 `;
 }
@@ -41,7 +47,12 @@ function parseArgs(argv) {
     dryRun: false,
     push: false,
     capabilityId: DEFAULT_CAPABILITY_ID,
-    limit: 5,
+    issueNumber: null,
+    limit: 1,
+    batch: false,
+    stopAfter: null,
+    publishReviewed: false,
+    allowOverwritePrivate: false,
     repo: null,
     repoPath: null,
     creamlonPath: null,
@@ -62,8 +73,18 @@ function parseArgs(argv) {
       opts.push = true;
     } else if (arg === '--capability-id') {
       opts.capabilityId = argv[++i];
+    } else if (arg === '--issue') {
+      opts.issueNumber = Number.parseInt(argv[++i], 10);
     } else if (arg === '--limit') {
       opts.limit = Number.parseInt(argv[++i], 10);
+    } else if (arg === '--batch') {
+      opts.batch = true;
+    } else if (arg === '--stop-after') {
+      opts.stopAfter = argv[++i];
+    } else if (arg === '--publish-reviewed') {
+      opts.publishReviewed = true;
+    } else if (arg === '--allow-overwrite-private') {
+      opts.allowOverwritePrivate = true;
     } else if (arg === '--repo') {
       opts.repo = argv[++i];
     } else if (arg === '--repo-path') {
@@ -84,8 +105,27 @@ function parseArgs(argv) {
   }
 
   if (!opts.capabilityId) throw new Error('--capability-id is required.');
+  if (opts.dryRun) opts.stopAfter = 'preflight';
+  if (opts.issueNumber !== null && (!Number.isInteger(opts.issueNumber) || opts.issueNumber < 1)) {
+    throw new Error('--issue must be a positive integer.');
+  }
   if (!Number.isInteger(opts.limit) || opts.limit < 1) {
     throw new Error('--limit must be a positive integer.');
+  }
+  if (opts.limit > 1 && !opts.batch) {
+    throw new Error('--limit > 1 requires --batch. Review mode processes one task by default.');
+  }
+  if (opts.stopAfter !== null && !STOP_AFTER_STAGES.has(opts.stopAfter)) {
+    throw new Error('--stop-after must be one of: preflight, render, deliver.');
+  }
+  if (opts.publishReviewed && opts.issueNumber === null) {
+    throw new Error('--publish-reviewed requires --issue.');
+  }
+  if (opts.publishReviewed && opts.stopAfter) {
+    throw new Error('--publish-reviewed cannot be used with --stop-after.');
+  }
+  if (opts.push && opts.stopAfter) {
+    throw new Error('--push cannot be used with --stop-after.');
   }
   for (const [name, value, min] of [
     ['--github-timeout-ms', opts.githubTimeoutMs, 1],
@@ -152,6 +192,10 @@ function parseJsonOutput(result, label) {
   } catch (error) {
     throw new Error(`${label} returned invalid JSON: ${error.message}\n${output}`);
   }
+}
+
+function formatJson(value) {
+  return `${JSON.stringify(value, null, 2)}\n`;
 }
 
 function parseRepoSlug(slug) {
@@ -284,6 +328,26 @@ async function writeGitHubFile(repoSlug, filePath, content, message, token, time
   }, timeoutMs);
 }
 
+async function githubFileExists(repoSlug, filePath, token, timeoutMs) {
+  const { owner, repo } = parseRepoSlug(repoSlug);
+  const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+  try {
+    const file = await githubJson(`https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`, token, {}, timeoutMs);
+    return file.type === 'file';
+  } catch (error) {
+    if (error.message.includes('GitHub API failed: 404')) return false;
+    throw error;
+  }
+}
+
+async function assertGitHubFilesDoNotExist(repoSlug, filePaths, token, timeoutMs) {
+  for (const filePath of filePaths) {
+    if (await githubFileExists(repoSlug, filePath, token, timeoutMs)) {
+      throw new Error(`Private delivery file already exists and needs human review: ${repoSlug}:${filePath}. Use --allow-overwrite-private only after confirming it is safe.`);
+    }
+  }
+}
+
 async function readGitHubFile(repoSlug, filePath, token, timeoutMs) {
   const { owner, repo } = parseRepoSlug(repoSlug);
   const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
@@ -305,6 +369,40 @@ function publicTrustDir(nodePath) {
   const bundledTrust = path.join(nodePath, '.creamlon', 'trust');
   if (existsSync(bundledTrust)) return path.join('.creamlon', 'trust');
   return 'trust';
+}
+
+function reviewOutDir(nodePath, issueNumber) {
+  return path.join(nodePath, '.data', 'auto-deliver', `issue-${issueNumber}`);
+}
+
+function reviewReportPath(nodePath, issueNumber) {
+  return path.join(reviewOutDir(nodePath, issueNumber), 'run-report.json');
+}
+
+function privateDeliveryBasePath(issueNumber) {
+  return `.creamlon-inbox/deliveries/issue-${issueNumber}`;
+}
+
+function privateDeliveryFilePaths(issueNumber) {
+  const basePath = privateDeliveryBasePath(issueNumber);
+  return [
+    `${basePath}/postcard.png`,
+    `${basePath}/postcard.html`,
+    `${basePath}/delivery.json`,
+    `${basePath}/proof.json`,
+    `${basePath}/status.json`,
+  ];
+}
+
+function writeReviewReport(nodePath, issueNumber, report) {
+  const outDir = reviewOutDir(nodePath, issueNumber);
+  mkdirSync(outDir, { recursive: true });
+  const filePath = reviewReportPath(nodePath, issueNumber);
+  writeFileSync(filePath, formatJson({
+    ...report,
+    updated_at: new Date().toISOString(),
+  }), 'utf8');
+  console.log(`[review] Wrote ${maskPathForLog(filePath)}.`);
 }
 
 function commitAndPushTrust(nodePath, issueNumber) {
@@ -388,7 +486,7 @@ async function fetchPrivateInput(nodePath, parsedTask, token, timeoutMs) {
 
 async function writePrivateInboxDeliveryFiles(nodePath, issueNumber, parsedTask, artifacts, token, timeoutMs) {
   const privateInput = resolvePrivateInput(nodePath, parsedTask);
-  const basePath = `.creamlon-inbox/deliveries/issue-${issueNumber}`;
+  const basePath = privateDeliveryBasePath(issueNumber);
 
   await writeGitHubFile(
     privateInput.inboxRepo,
@@ -417,10 +515,9 @@ async function writePrivateInboxDeliveryFiles(nodePath, issueNumber, parsedTask,
   console.log(`[ok] Wrote private postcard artifacts to ${privateInput.inboxRepo}:${basePath}.`);
 }
 
-async function writePrivateInboxProofFiles(nodePath, publicRepo, issueNumber, parsedTask, proof, token, timeoutMs) {
-  const privateInput = resolvePrivateInput(nodePath, parsedTask);
-  const basePath = `.creamlon-inbox/deliveries/issue-${issueNumber}`;
-  const status = {
+function buildPrivateDeliveryStatus(publicRepo, issueNumber, parsedTask, privateInput) {
+  const basePath = privateDeliveryBasePath(issueNumber);
+  return {
     version: '1',
     type: 'postcard_delivery_status',
     issue_number: issueNumber,
@@ -431,11 +528,17 @@ async function writePrivateInboxProofFiles(nodePath, publicRepo, issueNumber, pa
     delivery_path: `${basePath}/delivery.json`,
     postcard_path: `${basePath}/postcard.png`,
   };
+}
+
+async function writePrivateInboxProofFiles(nodePath, publicRepo, issueNumber, parsedTask, proof, token, timeoutMs) {
+  const privateInput = resolvePrivateInput(nodePath, parsedTask);
+  const basePath = privateDeliveryBasePath(issueNumber);
+  const status = buildPrivateDeliveryStatus(publicRepo, issueNumber, parsedTask, privateInput);
 
   await writeGitHubFile(
     privateInput.inboxRepo,
     `${basePath}/proof.json`,
-    `${JSON.stringify(proof, null, 2)}\n`,
+    formatJson(proof),
     `deliver Creamlon postcard proof #${issueNumber}`,
     token,
     timeoutMs,
@@ -443,7 +546,7 @@ async function writePrivateInboxProofFiles(nodePath, publicRepo, issueNumber, pa
   await writeGitHubFile(
     privateInput.inboxRepo,
     `${basePath}/status.json`,
-    `${JSON.stringify(status, null, 2)}\n`,
+    formatJson(status),
     `deliver Creamlon postcard status #${issueNumber}`,
     token,
     timeoutMs,
@@ -498,8 +601,81 @@ function keepArtifactsForRecovery(artifacts) {
   console.log(`[warn] Kept local artifacts for recovery at ${maskPathForLog(artifacts.outDir)}.`);
 }
 
+function keepArtifactsForReview(artifacts) {
+  if (!artifacts?.outDir) return;
+  console.log(`[review] Kept local artifacts at ${maskPathForLog(artifacts.outDir)}.`);
+}
+
 function delay(ms) {
   return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
+function assertTaskCanBeDelivered(task, parsedTask, capabilityId) {
+  if (parsedTask.capability_id !== capabilityId) {
+    throw new Error(`#${task.issue_number} capability mismatch: expected ${capabilityId}, got ${parsedTask.capability_id}.`);
+  }
+  if (parsedTask.input?.media_type !== 'text/plain') {
+    throw new Error(`#${task.issue_number} is not text/plain: ${parsedTask.input?.media_type || 'unknown'}.`);
+  }
+  if (!parsedTask.input?.digest) {
+    throw new Error(`#${task.issue_number} is missing private input.digest.`);
+  }
+}
+
+function localArtifactPaths(artifacts) {
+  if (!artifacts) return {};
+  return {
+    out_dir: maskPathForLog(artifacts.outDir),
+    postcard_html: maskPathForLog(artifacts.htmlPath),
+    postcard_png: maskPathForLog(artifacts.pngPath),
+    delivery_json: maskPathForLog(artifacts.deliveryPath),
+  };
+}
+
+function writeLocalProofFiles(artifacts, publicRepo, issueNumber, parsedTask, privateInput, proof) {
+  const proofPath = path.join(artifacts.outDir, 'proof.json');
+  const statusPath = path.join(artifacts.outDir, 'status.json');
+  const status = buildPrivateDeliveryStatus(publicRepo, issueNumber, parsedTask, privateInput);
+  writeFileSync(proofPath, formatJson(proof), 'utf8');
+  writeFileSync(statusPath, formatJson(status), 'utf8');
+  return {
+    proof_json: maskPathForLog(proofPath),
+    status_json: maskPathForLog(statusPath),
+  };
+}
+
+function reviewedArtifactPaths(nodePath, issueNumber) {
+  const outDir = reviewOutDir(nodePath, issueNumber);
+  return {
+    outDir,
+    htmlPath: path.join(outDir, 'postcard.html'),
+    pngPath: path.join(outDir, 'postcard.png'),
+    deliveryPath: path.join(outDir, 'delivery.json'),
+    proofPath: path.join(outDir, 'proof.json'),
+    statusPath: path.join(outDir, 'status.json'),
+  };
+}
+
+function readReviewedArtifacts(nodePath, issueNumber) {
+  const paths = reviewedArtifactPaths(nodePath, issueNumber);
+  for (const [name, filePath] of Object.entries(paths)) {
+    if (name === 'outDir') continue;
+    if (!existsSync(filePath)) {
+      throw new Error(`Reviewed artifact is missing: ${maskPathForLog(filePath)}. Run --stop-after deliver before --publish-reviewed.`);
+    }
+  }
+  return {
+    outDir: paths.outDir,
+    htmlPath: paths.htmlPath,
+    pngPath: paths.pngPath,
+    deliveryPath: paths.deliveryPath,
+    deliveryJson: readFileSync(paths.deliveryPath, 'utf8'),
+    proof: JSON.parse(readFileSync(paths.proofPath, 'utf8')),
+    localProofPaths: {
+      proof_json: maskPathForLog(paths.proofPath),
+      status_json: maskPathForLog(paths.statusPath),
+    },
+  };
 }
 
 async function main() {
@@ -515,7 +691,7 @@ async function main() {
     githubTimeoutMs: numberSetting('POSTCARD_GITHUB_TIMEOUT_MS', opts.githubTimeoutMs, envFile, DEFAULT_GITHUB_TIMEOUT_MS),
     taskTimeoutMs: numberSetting('POSTCARD_TASK_TIMEOUT_MS', opts.taskTimeoutMs, envFile, DEFAULT_TASK_TIMEOUT_MS),
     taskDelayMs: numberSetting('POSTCARD_TASK_DELAY_MS', opts.taskDelayMs, envFile, DEFAULT_TASK_DELAY_MS, 0),
-    keepArtifacts: boolSetting('POSTCARD_KEEP_ARTIFACTS', opts.keepArtifacts, envFile),
+    keepArtifacts: boolSetting('POSTCARD_KEEP_ARTIFACTS', opts.keepArtifacts, envFile, true),
   };
   const legacyToken = tokenSetting(envFile, ['GITHUB_TOKEN', 'GH_TOKEN']);
   const publicToken = tokenSetting(envFile, ['CREAMLON_PUBLIC_GITHUB_TOKEN', 'POSTCARD_PUBLIC_GITHUB_TOKEN'])
@@ -543,6 +719,60 @@ async function main() {
 
   const parseTask = await loadTaskParser(creamlonPath);
   const cliEnv = { GITHUB_TOKEN: publicToken, GH_TOKEN: publicToken };
+  if (opts.publishReviewed) {
+    const issueNumber = opts.issueNumber;
+    const body = await fetchIssueBody(nodeRepo, issueNumber, publicToken, runtime.githubTimeoutMs);
+    const parsed = parseTask(body);
+    assertTaskCanBeDelivered({ issue_number: issueNumber }, parsed, opts.capabilityId);
+    const privateInput = await fetchPrivateInput(repoPath, parsed, inboxToken, runtime.githubTimeoutMs);
+    const privatePaths = privateDeliveryFilePaths(issueNumber);
+    const artifacts = readReviewedArtifacts(repoPath, issueNumber);
+
+    const status = runCreamlon([
+      'status',
+      '--repo-path',
+      repoPath,
+    ], creamlonPath, cliEnv, runtime.taskTimeoutMs);
+    if (status.error || status.status !== 0) {
+      throw new Error(`creamlon status failed.\n${status.error?.message || status.stderr || status.stdout}`);
+    }
+    if (!opts.allowOverwritePrivate) {
+      await assertGitHubFilesDoNotExist(privateInput.inboxRepo, privatePaths, inboxToken, runtime.githubTimeoutMs);
+    }
+    await writePrivateInboxDeliveryFiles(repoPath, issueNumber, parsed, artifacts, inboxToken, runtime.githubTimeoutMs);
+    await writePrivateInboxProofFiles(repoPath, nodeRepo, issueNumber, parsed, artifacts.proof, inboxToken, runtime.githubTimeoutMs);
+    writeReviewReport(repoPath, issueNumber, {
+      version: '1',
+      mode: 'review',
+      public_repo: nodeRepo,
+      issue_number: issueNumber,
+      request_id: parsed.request_id,
+      capability_id: parsed.capability_id,
+      credential_id: privateInput.credentialId,
+      input_digest: privateInput.inputDigest,
+      private_input: {
+        inbox_repo: privateInput.inboxRepo,
+        input_path: privateInput.inputPath,
+        input_characters: privateInput.inputText.length,
+      },
+      planned_private_writes: privatePaths.map((filePath) => `${privateInput.inboxRepo}:${filePath}`),
+      allow_overwrite_private: opts.allowOverwritePrivate,
+      stage: 'publish-private',
+      status: 'ok',
+      local_artifacts: {
+        ...localArtifactPaths(artifacts),
+        ...artifacts.localProofPaths,
+      },
+      public_trust_dir: publicTrustDir(repoPath),
+    });
+    if (opts.push) {
+      commitAndPushTrust(repoPath, issueNumber);
+    } else {
+      console.log(`[todo] Commit and push ${publicTrustDir(repoPath)}, or rerun with --push.`);
+    }
+    return;
+  }
+
   const watch = runCreamlon([
     'watch',
     nodeRepo,
@@ -552,57 +782,77 @@ async function main() {
     '--pretty',
   ], creamlonPath, cliEnv, runtime.taskTimeoutMs);
   const watchJson = parseJsonOutput(watch, 'creamlon watch');
-  const tasks = (watchJson.tasks || [])
-    .filter((task) => task.valid && task.capability_id === opts.capabilityId)
-    .slice(0, opts.limit);
+  const allTasks = watchJson.tasks || [];
+  let targetedTask = null;
+  if (opts.issueNumber !== null) {
+    targetedTask = allTasks.find((task) => Number(task.issue_number) === opts.issueNumber);
+    if (!targetedTask) {
+      throw new Error(`#${opts.issueNumber} was not returned by creamlon watch.`);
+    }
+    if (!targetedTask.valid) {
+      throw new Error(`#${opts.issueNumber} is not a valid pending task and needs human review.`);
+    }
+  }
+  const tasks = targetedTask
+    ? [targetedTask]
+    : allTasks
+      .filter((task) => task.valid && task.capability_id === opts.capabilityId)
+      .slice(0, opts.limit);
 
   if (tasks.length === 0) {
-    console.log(`[ok] No valid pending ${opts.capabilityId} tasks.`);
+    const target = opts.issueNumber === null ? `pending ${opts.capabilityId} tasks` : `Issue #${opts.issueNumber}`;
+    console.log(`[ok] No valid ${target}.`);
     return;
+  }
+  if (!opts.batch && tasks.length > 1) {
+    throw new Error(`Review mode expected one task, got ${tasks.length}. Use --batch only after reviewing the queue.`);
   }
 
   console.log(`[info] Found ${tasks.length} valid ${opts.capabilityId} task(s).`);
   for (const task of tasks) {
     const body = await fetchIssueBody(nodeRepo, task.issue_number, publicToken, runtime.githubTimeoutMs);
     const parsed = parseTask(body);
-    if (parsed.capability_id !== opts.capabilityId) {
-      console.log(`[skip] #${task.issue_number} capability mismatch: ${parsed.capability_id}`);
-      continue;
-    }
-    if (parsed.input?.media_type !== 'text/plain') {
-      console.log(`[skip] #${task.issue_number} is not text/plain: ${parsed.input?.media_type || 'unknown'}`);
-      continue;
-    }
-    if (!parsed.input?.digest) {
-      console.log(`[skip] #${task.issue_number} is missing private input.digest.`);
-      continue;
-    }
-
-    if (opts.dryRun) {
-      let privateInput;
-      try {
-        privateInput = await fetchPrivateInput(repoPath, parsed, inboxToken, runtime.githubTimeoutMs);
-      } catch (error) {
-        console.log(`[skip] #${task.issue_number} private input is unavailable: ${error.message}`);
-        continue;
-      }
-      console.log(`[dry-run] #${task.issue_number} would render ${privateInput.inputText.length} private characters from ${privateInput.inboxRepo}:${privateInput.inputPath}.`);
-      continue;
-    }
+    assertTaskCanBeDelivered(task, parsed, opts.capabilityId);
 
     let deliveredTask = false;
+    let stoppedForReview = null;
     await withLocalLock(repoPath, 'deliver', `${task.issue_number}-${parsed.request_id}`, async () => {
       let artifacts = null;
       try {
-        let privateInput;
-        try {
-          privateInput = await fetchPrivateInput(repoPath, parsed, inboxToken, runtime.githubTimeoutMs);
-        } catch (error) {
-          console.log(`[skip] #${task.issue_number} private input is unavailable: ${error.message}`);
+        const privateInput = await fetchPrivateInput(repoPath, parsed, inboxToken, runtime.githubTimeoutMs);
+        const privatePaths = privateDeliveryFilePaths(task.issue_number);
+        const baseReport = {
+          version: '1',
+          mode: 'review',
+          public_repo: nodeRepo,
+          issue_number: task.issue_number,
+          request_id: parsed.request_id,
+          capability_id: parsed.capability_id,
+          credential_id: privateInput.credentialId,
+          input_digest: privateInput.inputDigest,
+          private_input: {
+            inbox_repo: privateInput.inboxRepo,
+            input_path: privateInput.inputPath,
+            input_characters: privateInput.inputText.length,
+          },
+          planned_private_writes: privatePaths.map((filePath) => `${privateInput.inboxRepo}:${filePath}`),
+          allow_overwrite_private: opts.allowOverwritePrivate,
+        };
+        if (!opts.allowOverwritePrivate) {
+          await assertGitHubFilesDoNotExist(privateInput.inboxRepo, privatePaths, inboxToken, runtime.githubTimeoutMs);
+        }
+        writeReviewReport(repoPath, task.issue_number, {
+          ...baseReport,
+          stage: 'preflight',
+          status: 'ok',
+        });
+        if (opts.stopAfter === 'preflight') {
+          stoppedForReview = 'preflight';
+          console.log(`[review] Stopped after preflight for Issue #${task.issue_number}.`);
           return;
         }
 
-        const basePath = `.creamlon-inbox/deliveries/issue-${task.issue_number}`;
+        const basePath = privateDeliveryBasePath(task.issue_number);
         artifacts = await renderPostcard({
           repoPath,
           issueNumber: task.issue_number,
@@ -614,6 +864,18 @@ async function main() {
           deliveryBasePath: basePath,
           timeoutMs: runtime.taskTimeoutMs,
         });
+        writeReviewReport(repoPath, task.issue_number, {
+          ...baseReport,
+          stage: 'render',
+          status: 'ok',
+          local_artifacts: localArtifactPaths(artifacts),
+        });
+        if (opts.stopAfter === 'render') {
+          stoppedForReview = 'render';
+          console.log(`[review] Stopped after render for Issue #${task.issue_number}.`);
+          return;
+        }
+
         console.log(`[deliver] #${task.issue_number} output=${maskPathForLog(artifacts.deliveryPath)}`);
         const delivered = runCreamlon([
           'deliver',
@@ -626,9 +888,7 @@ async function main() {
           '--pretty',
         ], creamlonPath, cliEnv, runtime.taskTimeoutMs);
         const proof = parseJsonOutput(delivered, `creamlon deliver #${task.issue_number}`);
-
-        await writePrivateInboxDeliveryFiles(repoPath, task.issue_number, parsed, artifacts, inboxToken, runtime.githubTimeoutMs);
-        await writePrivateInboxProofFiles(repoPath, nodeRepo, task.issue_number, parsed, proof, inboxToken, runtime.githubTimeoutMs);
+        const localProofPaths = writeLocalProofFiles(artifacts, nodeRepo, task.issue_number, parsed, privateInput, proof);
 
         const status = runCreamlon([
           'status',
@@ -638,16 +898,52 @@ async function main() {
         if (status.error || status.status !== 0) {
           throw new Error(`creamlon status failed.\n${status.error?.message || status.stderr || status.stdout}`);
         }
+        writeReviewReport(repoPath, task.issue_number, {
+          ...baseReport,
+          stage: 'deliver',
+          status: 'ok',
+          local_artifacts: {
+            ...localArtifactPaths(artifacts),
+            ...localProofPaths,
+          },
+          public_trust_dir: publicTrustDir(repoPath),
+        });
+        if (opts.stopAfter === 'deliver') {
+          stoppedForReview = 'deliver';
+          console.log(`[review] Stopped after deliver for Issue #${task.issue_number}. Review local trust changes before publishing.`);
+          return;
+        }
+
+        if (!opts.allowOverwritePrivate) {
+          await assertGitHubFilesDoNotExist(privateInput.inboxRepo, privatePaths, inboxToken, runtime.githubTimeoutMs);
+        }
+        await writePrivateInboxDeliveryFiles(repoPath, task.issue_number, parsed, artifacts, inboxToken, runtime.githubTimeoutMs);
+        await writePrivateInboxProofFiles(repoPath, nodeRepo, task.issue_number, parsed, proof, inboxToken, runtime.githubTimeoutMs);
+        writeReviewReport(repoPath, task.issue_number, {
+          ...baseReport,
+          stage: 'publish-private',
+          status: 'ok',
+          local_artifacts: {
+            ...localArtifactPaths(artifacts),
+            ...localProofPaths,
+          },
+          public_trust_dir: publicTrustDir(repoPath),
+        });
         deliveredTask = true;
       } finally {
         if (deliveredTask) {
           cleanupArtifacts(artifacts, runtime.keepArtifacts);
+        } else if (stoppedForReview) {
+          keepArtifactsForReview(artifacts);
         } else {
           keepArtifactsForRecovery(artifacts);
         }
       }
     });
-    if (!deliveredTask) continue;
+    if (!deliveredTask) {
+      if (stoppedForReview) continue;
+      throw new Error(`#${task.issue_number} did not complete delivery.`);
+    }
 
     if (opts.push) {
       commitAndPushTrust(repoPath, task.issue_number);
